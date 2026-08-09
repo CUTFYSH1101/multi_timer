@@ -1,0 +1,16 @@
+{
+  "name": "multi-timer",
+  "version": "2.0.0",
+  "description": "多重倒數計時器 — UI 與邏輯分離版",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "serve": "node server.js",
+    "build": "node build.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
