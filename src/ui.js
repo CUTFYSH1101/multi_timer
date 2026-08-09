@@ -3,7 +3,8 @@
 import { STR, LANG_ABBR, t, nextLang, isLang } from './i18n.js';
 import { fmt, parseTime } from './time.js';
 import { splitColumns } from './layout.js';
-import { buildAnnouncement } from './announcer.js';
+import { announcementFor } from './announcer.js';
+import { createSettingsPanel } from './settingsui.js';
 
 const TICK_MS = 200;
 
@@ -16,6 +17,7 @@ export function createUI(config) {
     beep = () => {},
     ensureAudio = () => {},
     confirmFn = () => true,
+    alertFn = () => {},
     lang: initialLang = 'zh-Hant',
     voice: initialVoice = true,
     announceGroup: initialAnnounceGroup = false,
@@ -24,6 +26,7 @@ export function createUI(config) {
   let lang = isLang(initialLang) ? initialLang : 'zh-Hant';
   let announceGroup = initialAnnounceGroup;
   let clockId = null;
+  let keyHandler = null;
 
   const el = id => doc.getElementById(id);
   const colLeft = el('colLeft');
@@ -45,6 +48,7 @@ export function createUI(config) {
       announceGroup,
       lang,
       items: store.toJSON(),
+      ...store.extrasJSON(),
     });
     if (saveWarn) {
       saveWarn.textContent = result.ok ? '' : tr('cookieTooLarge');
@@ -52,6 +56,16 @@ export function createUI(config) {
     }
     return result;
   }
+
+  /* ---------------- 設定面板 ---------------- */
+
+  const settings = createSettingsPanel({
+    doc,
+    store,
+    tr,
+    alertFn,
+    onChange: needsRender => { if (needsRender) render(); else save(); },
+  });
 
   /* ---------------- 翻譯 ---------------- */
 
@@ -67,11 +81,36 @@ export function createUI(config) {
     announceBtn.textContent = announceGroup ? tr('announceGroupLabel') : tr('announceLabelOnly');
     el('uiFooter1').innerHTML = tr('footer1');
     el('uiFooter2').innerHTML = tr('footer2');
+    const f3 = el('uiFooter3');
+    if (f3) f3.innerHTML = tr('footer3');
     langBtn.textContent = LANG_ABBR[lang];
     doc.documentElement.lang = lang;
+    settings.applyLabels();
   }
 
   /* ---------------- 視覺更新 ---------------- */
+
+  /** 本輪靜音的按鈕長相。靜音不影響倒數，所以這裡只換圖示跟樣式。 */
+  function applyMuteVisual(node, target, isGroup) {
+    if (!node) return;
+    const btn = node.querySelector('.mute-btn');
+    if (!btn) return;
+    const muted = !!target.mutedThisRound;
+    btn.textContent = muted ? '🔇' : '🔊';
+    btn.classList.toggle('active', muted);
+    btn.title = isGroup
+      ? (muted ? tr('unmuteGroupTip') : tr('muteGroupTip'))
+      : (muted ? tr('unmuteTip') : tr('muteTip'));
+    node.classList.toggle('muted', muted);
+  }
+
+  function updateMuteVisual(target) {
+    const isGroup = target.kind === 'group';
+    const node = doc.getElementById((isGroup ? 'groupheader-' : 'row-') + target.id);
+    applyMuteVisual(node, target, isGroup);
+    // 群組靜音蓋過單元靜音，所以群組一動，底下每一列的「實際會不會出聲」也跟著變
+    if (isGroup) target.timers.forEach(x => updateRowVisual(x));
+  }
 
   function applyRowVisual(row, timer) {
     if (!row) return;
@@ -81,7 +120,9 @@ export function createUI(config) {
     // 暫停但還沒重設回滿血：也用唯讀的剩餘時間顯示，不要秀出可編輯的總時長輸入框，
     // 否則暫停時看到的數字（總時長）會跟實際剩下的時間對不上。
     const pausedMidway = !counting && timer.remainingSec !== timer.totalSec;
-    if (counting || pausedMidway) {
+    // 套用過時間軸模板的計時器：時間鎖住，永遠唯讀顯示，不准手動編輯
+    const locked = !!store.timelineOfTimer(timer);
+    if (counting || pausedMidway || locked) {
       timeDisplay.style.display = 'block';
       timeInput.style.display = 'none';
       timeDisplay.textContent = fmt(timer.remainingSec);
@@ -89,13 +130,19 @@ export function createUI(config) {
       timeDisplay.style.display = 'none';
       timeInput.style.display = 'block';
     }
+    timeInput.disabled = locked;
+    row.classList.toggle('locked', locked);
+    timeDisplay.title = locked ? tr('timelineLockedTip') : '';
     row.classList.toggle('done', timer.done);
+    // 被群組蓋掉的單元也要看得出來這輪不會出聲
+    row.classList.toggle('silenced', store.isSilenced(timer));
 
     const startBtn = row.querySelector('.start-btn');
     startBtn.textContent = timer.running ? '⏸' : '▶';
     startBtn.title = timer.running ? tr('pauseTip') : tr('startTip');
     startBtn.classList.toggle('active', timer.running);
     row.querySelector('.loop-btn').classList.toggle('active', timer.loop);
+    applyMuteVisual(row, timer, false);
   }
 
   function updateRowVisual(timer) {
@@ -139,6 +186,7 @@ export function createUI(config) {
         '<span class="time-display"></span>' +
         '<input class="time-input" style="display:none">' +
       '</div>' +
+      '<button class="icon-btn mute-btn">🔊</button>' +
       '<button class="icon-btn start-btn">▶</button>' +
       '<button class="icon-btn loop-btn">🔁</button>' +
       '<button class="icon-btn reset-btn">⟲</button>' +
@@ -155,6 +203,12 @@ export function createUI(config) {
     timeInput.addEventListener('change', () => { timeInput.value = fmt(timer.totalSec); save(); });
 
     row.querySelector('.time-display').textContent = fmt(timer.remainingSec);
+
+    // 本輪靜音：只切旗標，不碰 running / remainingSec
+    row.querySelector('.mute-btn').addEventListener('click', () => {
+      store.toggleMute(timer);
+      updateRowVisual(timer);
+    });
 
     const startBtn = row.querySelector('.start-btn');
     startBtn.title = tr('startTip');
@@ -186,6 +240,45 @@ export function createUI(config) {
     return row;
   }
 
+  /** 群組的時間軸模板選單。選了就把模板換算成群組內計時器的長度。沒有任何模板時整條不出現。 */
+  function buildTimelineBar(group) {
+    if (store.timelines.length === 0) return null;
+    const bar = doc.createElement('div');
+    bar.className = 'group-timeline';
+
+    const sel = doc.createElement('select');
+    sel.className = 'timeline-select';
+    sel.id = 'timeline-' + group.id;
+
+    const none = doc.createElement('option');
+    none.value = '';
+    none.textContent = tr('timelineNone');
+    sel.appendChild(none);
+
+    for (const tl of store.timelines) {
+      const o = doc.createElement('option');
+      o.value = tl.id;
+      o.textContent = tl.name;
+      sel.appendChild(o);
+    }
+    sel.value = group.timelineId || '';
+
+    // 套用是一次性的換算動作：可能會新增或刪除計時器，刪除前要先問過使用者
+    sel.addEventListener('change', () => {
+      const timelineId = sel.value || null;
+      const plan = store.planTimelineApply(group, timelineId);
+      if (plan.deleteCount > 0 && !confirmFn(tr('timelineApplyConfirm').replace('{n}', String(plan.deleteCount)))) {
+        sel.value = group.timelineId || '';
+        return;
+      }
+      store.applyTimelineTemplate(group, timelineId, tr('newTimerLabel'));
+      render();
+    });
+
+    bar.appendChild(sel);
+    return bar;
+  }
+
   function buildGroupBlock(group) {
     const wrap = doc.createElement('div');
     wrap.className = 'group-block';
@@ -201,7 +294,9 @@ export function createUI(config) {
     header.innerHTML =
       '<button class="collapse-btn">' + (group.collapsed ? '▸' : '▾') + '</button>' +
       '<input class="group-label-input" maxlength="24">' +
+      '<span class="hotkey-badge"></span>' +
       '<span class="group-count" id="groupcount-' + group.id + '"></span>' +
+      '<button class="icon-btn mute-btn">🔊</button>' +
       '<button class="icon-btn start-btn' + (anyRunning ? ' active' : '') + '">' + (anyRunning ? '⏸' : '▶') + '</button>' +
       '<button class="icon-btn loop-btn' + (allLooping ? ' active' : '') + '">🔁</button>' +
       '<button class="icon-btn reset-btn">⟲</button>' +
@@ -210,6 +305,7 @@ export function createUI(config) {
 
     header.querySelector('.group-count').textContent =
       group.timers.length + (runningCount > 0 ? ' · ▶' + runningCount : '');
+    header.querySelector('.hotkey-badge').textContent = group.hotkey ? '[' + group.hotkey + ']' : '';
 
     const collapseBtn = header.querySelector('.collapse-btn');
     collapseBtn.title = tr('collapseTip');
@@ -219,6 +315,12 @@ export function createUI(config) {
     glabel.value = group.label;
     glabel.addEventListener('input', () => { group.label = glabel.value || tr('newGroupLabel'); });
     glabel.addEventListener('change', save);
+
+    // 群組靜音蓋過單元靜音：勾了群組，底下全部這輪都不唸
+    header.querySelector('.mute-btn').addEventListener('click', () => {
+      store.toggleMute(group);
+      updateMuteVisual(group);
+    });
 
     const startBtn = header.querySelector('.start-btn');
     startBtn.title = tr('startAllTip');
@@ -230,7 +332,7 @@ export function createUI(config) {
 
     const resetBtn = header.querySelector('.reset-btn');
     resetBtn.title = tr('resetAllTip');
-    resetBtn.addEventListener('click', () => { store.batchReset(group.timers); render(); });
+    resetBtn.addEventListener('click', () => { store.resetGroup(group); render(); });
 
     const delBtn = header.querySelector('.del-btn');
     delBtn.title = tr('delGroupTip');
@@ -239,6 +341,9 @@ export function createUI(config) {
       store.removeGroup(group.id);
       render();
     });
+
+    const timelineBar = buildTimelineBar(group);
+    if (timelineBar) wrap.appendChild(timelineBar);
 
     if (!group.collapsed) {
       const members = doc.createElement('div');
@@ -255,6 +360,7 @@ export function createUI(config) {
       wrap.appendChild(members);
     }
 
+    applyMuteVisual(header, group, true);
     return wrap;
   }
 
@@ -268,6 +374,7 @@ export function createUI(config) {
     left.forEach(it => colLeft.appendChild(build(it)));
     right.forEach(it => colRight.appendChild(build(it)));
     updateToggleAllButton();
+    settings.render();
     save();
   }
 
@@ -281,13 +388,12 @@ export function createUI(config) {
   function handleEvents(events) {
     for (const ev of events) {
       if (ev.type !== 'expired') continue;
-      beep();
-      speaker.speak(buildAnnouncement({
-        timerLabel: ev.timer.label,
-        groupLabel: ev.group ? ev.group.label : null,
-        announceGroup,
-        suffix: STR[lang].timeUpSuffix,
-      }));
+      // 靜音／被合併吃掉的那一聲：畫面照閃，但不出聲
+      const text = announcementFor(ev, { announceGroup, suffix: STR[lang].timeUpSuffix });
+      if (text !== null) {
+        beep();
+        speaker.speak(text);
+      }
       if (ev.group && ev.group.collapsed) flashGroupHeader(ev.group.id);
     }
   }
@@ -301,6 +407,24 @@ export function createUI(config) {
     refreshBadges();
   }
 
+  /* ---------------- 快捷鍵 ---------------- */
+
+  /** 在輸入框裡打字時不能被快捷鍵搶走按鍵 */
+  function isTypingTarget(node) {
+    if (!node) return false;
+    const tag = (node.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable === true;
+  }
+
+  function onKeyDown(e) {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (isTypingTarget(e.target)) return;
+    const group = store.triggerHotkey(e.key);
+    if (!group) return;
+    if (e.preventDefault) e.preventDefault();
+    updateMuteVisual(group);
+  }
+
   /* ---------------- 工具列 ---------------- */
 
   function wireToolbar() {
@@ -309,7 +433,15 @@ export function createUI(config) {
       store.batchToggleStart(store.flatten());
       render();
     });
-    el('resetAllBtn').addEventListener('click', () => { store.batchReset(store.flatten()); speaker.stop(); render(); });
+
+    // 全部重設：計時器歸位、本輪靜音一次清空，只設定不自動開始倒數
+    el('resetAllBtn').addEventListener('click', () => {
+      ensureAudio();
+      store.resetAll();
+      speaker.stop();
+      render();
+    });
+
     el('addTimerBtn').addEventListener('click', () => { store.addTimer(tr('newTimerLabel')); render(); });
     el('addGroupBtn').addEventListener('click', () => { store.addGroup(tr('newGroupLabel')); render(); });
 
@@ -326,6 +458,9 @@ export function createUI(config) {
       applyStaticTranslations();
       render();
     });
+
+    keyHandler = onKeyDown;
+    doc.addEventListener('keydown', keyHandler);
   }
 
   return {
@@ -337,9 +472,15 @@ export function createUI(config) {
       // 提醒會延遲到切回來那一刻才響。setInterval 在背景只被降頻，不會停。
       clockId = setInterval(step, TICK_MS);
     },
-    stop() { if (clockId) clearInterval(clockId); clockId = null; },
+    stop() {
+      if (clockId) clearInterval(clockId);
+      clockId = null;
+      if (keyHandler) doc.removeEventListener('keydown', keyHandler);
+      keyHandler = null;
+    },
     render,
     applyStaticTranslations,
+    settings,
     getLang: () => lang,
     isAnnounceGroup: () => announceGroup,
     isVoiceOn: () => voiceToggle.checked,

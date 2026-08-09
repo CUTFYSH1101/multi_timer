@@ -11,6 +11,25 @@ export function buildAnnouncement(opts) {
 }
 
 /**
+ * 從一個到期事件組出這一聲要唸的字；不用出聲時回傳 null。
+ *
+ * 合併播報用的是使用者綁定時自己打的那串字，程式不會去把「上路」跟「下路」
+ * 兜成「上下路」——那需要程式看懂標籤的語意，會踩到「系統不准懂遊戲」。
+ */
+export function announcementFor(ev, opts = {}) {
+  if (!ev || ev.type !== 'expired') return null;
+  if (ev.silent || ev.suppressed) return null;
+  const { announceGroup = false, suffix = '' } = opts;
+  if (ev.mergedText) return ev.mergedText + suffix;
+  return buildAnnouncement({
+    timerLabel: ev.timer.label,
+    groupLabel: ev.group ? ev.group.label : null,
+    announceGroup,
+    suffix,
+  });
+}
+
+/**
  * @param {{
  *   synth: {speak:Function, cancel?:Function} | null,
  *   Utterance: Function | null,

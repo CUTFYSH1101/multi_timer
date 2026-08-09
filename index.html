@@ -103,7 +103,7 @@
     border-radius:7px;
     padding:6px 8px;
     display:grid;
-    grid-template-columns: 1fr 74px 34px 34px 34px 22px;
+    grid-template-columns: 1fr 74px 34px 34px 34px 34px 22px;
     gap:8px;
     align-items:center;
   }
@@ -141,6 +141,9 @@
     font-variant-numeric:tabular-nums;
   }
   .time-input:focus{outline:none; border-bottom:1px dashed var(--row-color, var(--accent1));}
+  /* 套用過時間軸模板：時間鎖住不能手動編輯，用鎖頭圖示提示原因 */
+  .row.locked .time-display{cursor:help;}
+  .row.locked .time-display::after{content:' 🔒'; font-size:10px; opacity:.7;}
 
   .icon-btn{
     background:transparent; border:1px solid var(--line); color:var(--sub);
@@ -150,6 +153,23 @@
   .icon-btn:hover{background:var(--row-hover); color:var(--text);}
   .icon-btn.active{background:var(--row-color, var(--accent1)); color:#04231D; border-color:transparent;}
   .icon-btn.loop-btn.active{background:rgba(240,180,41,0.16); border-color:var(--accent2); color:var(--accent2);}
+  /* 本輪靜音：只是不出聲，倒數照跑 —— 所以視覺上壓低，不是「停用」 */
+  .icon-btn.mute-btn.active{background:rgba(251,113,133,0.16); border-color:var(--accent4); color:var(--accent4);}
+  .row.silenced .label-input,
+  .row.silenced .time-display{opacity:.55;}
+  .group-header.muted .group-label-input{opacity:.55;}
+
+  .group-timeline{
+    background:var(--group-body);
+    border-top:1px solid var(--line);
+    padding:4px 8px 4px 20px;
+  }
+  .timeline-select{
+    width:100%; background:var(--row); color:var(--text);
+    border:1px solid var(--line); border-radius:6px;
+    font-family:'Inter',sans-serif; font-size:11.5px; padding:3px 6px;
+  }
+  .timeline-select:focus{outline:none; border-color:var(--accent3);}
 
   .del-btn{
     background:transparent; border:none; color:var(--sub);
@@ -167,11 +187,15 @@
     border-left:3px solid var(--row-color, var(--accent3));
     padding:6px 8px;
     display:grid;
-    grid-template-columns: 18px 1fr 44px 34px 34px 34px 22px;
+    grid-template-columns: 18px 1fr 26px 44px 34px 34px 34px 34px 22px;
     gap:8px;
     align-items:center;
   }
   .group-header.flash-alert{animation:flash 0.5s ease-in-out 3;}
+  .hotkey-badge{
+    font-family:'Chakra Petch',monospace; font-size:10.5px; color:var(--accent5);
+    text-align:center; white-space:nowrap;
+  }
   .collapse-btn{
     background:transparent; border:none; color:var(--sub);
     font-size:11px; padding:2px; cursor:pointer; width:18px;
@@ -200,6 +224,41 @@
   }
   .add-to-group:hover{border-color:var(--accent3); color:var(--accent3);}
 
+  /* 設定面板：遊戲中最重要的是看計時器，所以這區預設收起來，不常駐畫面 */
+  .settings-panel{
+    display:none;
+    border:1px solid var(--line); border-radius:8px;
+    background:var(--group-body);
+    padding:10px 12px; margin-bottom:12px;
+  }
+  .set-section{margin-bottom:14px;}
+  .set-section:last-child{margin-bottom:0;}
+  .set-section h3{
+    font-family:'Chakra Petch',monospace; font-size:12.5px; margin:0 0 4px;
+    color:var(--accent3); letter-spacing:.02em;
+  }
+  .set-hint{margin:0 0 7px; font-size:11px; color:var(--sub); line-height:1.6;}
+  .set-empty{margin:0 0 7px; font-size:11.5px; color:var(--sub);}
+  .set-row{
+    display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+    margin-bottom:5px;
+  }
+  .set-row input, .set-select{
+    background:var(--row); color:var(--text);
+    border:1px solid var(--line); border-radius:6px;
+    font-family:'Inter',sans-serif; font-size:11.5px; padding:4px 7px;
+    min-width:0;
+  }
+  .set-row input:focus, .set-select:focus{outline:none; border-color:var(--accent1);}
+  .set-name{flex:1 1 140px;}
+  .set-points{flex:2 1 220px; font-family:'Chakra Petch',monospace;}
+  .set-select{flex:1 1 150px;}
+  .set-tol{width:64px; text-align:right; font-family:'Chakra Petch',monospace;}
+  .set-key{width:44px; text-align:center; font-family:'Chakra Petch',monospace;}
+  .set-time{width:76px; text-align:right; font-family:'Chakra Petch',monospace;}
+  .set-members{font-size:11.5px; color:var(--sub); flex:1 1 160px;}
+  .set-add{margin-top:3px;}
+
   footer{
     margin-top:20px; color:var(--sub); font-size:11.5px; line-height:1.7;
     border-top:1px solid var(--line); padding-top:12px;
@@ -209,8 +268,8 @@
 
   @media (max-width:720px){
     .board{grid-template-columns: 1fr;}
-    .row{grid-template-columns: 1fr 66px 32px 32px 32px 20px;}
-    .group-header{grid-template-columns: 18px 1fr 40px 32px 32px 32px 20px;}
+    .row{grid-template-columns: 1fr 66px 32px 32px 32px 32px 20px;}
+    .group-header{grid-template-columns: 18px 1fr 24px 40px 32px 32px 32px 32px 20px;}
   }
 </style>
 </head>
@@ -228,6 +287,7 @@
     <button class="btn-group" id="addGroupBtn">+ 新增群組</button>
     <button class="btn-lang" id="langBtn" title="切換語言 / 切换语言 / Switch language">繁</button>
     <div class="spacer"></div>
+    <button class="btn-ghost" id="settingsBtn">⚙ 設定</button>
     <button class="btn-ghost" id="announceModeBtn">只唸標籤</button>
     <label class="voice-toggle">
       <input type="checkbox" id="voiceToggle" checked>
@@ -237,6 +297,8 @@
 
   <p class="save-warn" id="saveWarn"></p>
 
+  <div class="settings-panel" id="settingsPanel"></div>
+
   <div class="board">
     <div class="column" id="colLeft"></div>
     <div class="column" id="colRight"></div>
@@ -244,6 +306,7 @@
 
   <footer>
     <p id="uiFooter1"></p>
+    <p id="uiFooter3"></p>
     <p id="uiFooter2"></p>
   </footer>
 </div>

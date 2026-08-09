@@ -49,7 +49,7 @@ const lang = isLang(saved.lang) ? saved.lang : 'zh-Hant';
 const store = new TimerStore({ now: () => performance.now() });
 
 if (!saved.empty) {
-  store.loadJSON(saved.items, {
+  store.loadState(saved, {
     timerLabel: STR[lang].newTimerLabel,
     groupLabel: STR[lang].newGroupLabel,
   });
@@ -77,6 +77,7 @@ const ui = createUI({
   beep,
   ensureAudio,
   confirmFn: msg => window.confirm(msg),
+  alertFn: msg => window.alert(msg),
   lang,
   voice: saved.voice,
   announceGroup: saved.announceGroup,

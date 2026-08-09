@@ -34,14 +34,22 @@ export function normalizeState(raw, defaults = {}) {
     announceGroup: false,
     lang: 'zh-Hant',
     items: [],
+    sessionSec: 600,
+    timelines: [],
+    pairs: [],
     ...defaults,
   };
   if (!raw || typeof raw !== 'object') return { ...base, empty: true };
+  const sessionSec = Number(raw.sessionSec);
   return {
     voice: raw.voice !== false,
     announceGroup: raw.announceGroup === true,
     lang: typeof raw.lang === 'string' ? raw.lang : base.lang,
     items: Array.isArray(raw.items) ? raw.items : [],
+    // 時間軸與配對是使用者自己建的資料，跟計時器一樣要還原
+    sessionSec: Number.isFinite(sessionSec) && sessionSec > 0 ? sessionSec : base.sessionSec,
+    timelines: Array.isArray(raw.timelines) ? raw.timelines : [],
+    pairs: Array.isArray(raw.pairs) ? raw.pairs : [],
     empty: !Array.isArray(raw.items) || raw.items.length === 0,
   };
 }
