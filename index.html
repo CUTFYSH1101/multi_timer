@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>多重倒數計時器</title>
-<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="./favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -72,6 +72,18 @@
     user-select:none;
   }
   .voice-toggle input{accent-color:var(--accent1); width:14px; height:14px; cursor:pointer;}
+
+  .save-warn{
+    display:none;
+    margin:0 0 10px;
+    padding:7px 11px;
+    border:1px solid var(--accent2);
+    border-radius:7px;
+    background:rgba(240,180,41,0.08);
+    color:var(--accent2);
+    font-size:12px;
+    line-height:1.5;
+  }
 
   .board{
     display:grid;
@@ -205,7 +217,7 @@
 <div class="wrap">
   <header>
     <h1 id="uiTitle">多重倒數計時器</h1>
-    <p id="uiSubtitle">同時追蹤多個目標，時間到自動語音提醒 —— 適合 LoL / Pokémon UNITE 等多目標遊戲</p>
+    <p id="uiSubtitle"></p>
   </header>
 
   <div class="toolbar">
@@ -223,6 +235,8 @@
     </label>
   </div>
 
+  <p class="save-warn" id="saveWarn"></p>
+
   <div class="board">
     <div class="column" id="colLeft"></div>
     <div class="column" id="colRight"></div>
@@ -234,457 +248,6 @@
   </footer>
 </div>
 
-<script>
-const COLORS = ['#5EEAD4','#F0B429','#C084FC','#FB7185','#60A5FA','#34D399'];
-const colLeft = document.getElementById('colLeft');
-const colRight = document.getElementById('colRight');
-const voiceToggle = document.getElementById('voiceToggle');
-const langBtn = document.getElementById('langBtn');
-let items = [];
-let idCounter = 0;
-let colorIdx = 0;
-let audioCtx = null;
-
-/* ---------------- i18n ---------------- */
-const LANGS = ['zh-Hant','zh-Hans','en'];
-const LANG_ABBR = { 'zh-Hant':'繁', 'zh-Hans':'简', 'en':'US' };
-let currentLang = 'zh-Hant';
-
-const STR = {
-  'zh-Hant': {
-    title:'多重倒數計時器',
-    subtitle:'同時追蹤多個目標，時間到自動語音提醒 —— 適合 LoL / Pokémon UNITE 等多目標遊戲',
-    startAll:'▶ 全部開始', pauseAll:'⏸ 全部暫停', resetAll:'⟲ 全部重設',
-    addTimer:'+ 新增計時器', addGroup:'+ 新增群組',
-    voice:'🔊 語音提醒',
-    footer1:'點時間數字可直接輸入新的分:秒（例如 8:50）。🔁 開啟後時間到會自動重新倒數。群組可收合成一行，收合後點群組列的 ▶/🔁/⟲ 會套用到群組內<b>所有</b>計時器；收合時內部欄位無法個別操作，展開後才能各自調整。',
-    footer2:'標籤文字、時間與語音開關會存進瀏覽器 Cookie 永久保留，下次打開這個檔案會自動還原。<b>注意：</b>如果是在 Claude 對話框內的預覽畫面使用，瀏覽器可能會封鎖第三方 Cookie 而無法儲存；請下載這個 HTML 檔案後直接用瀏覽器開啟，Cookie 才會正常運作。',
-    newTimerLabel:'新計時器', newGroupLabel:'新群組', addToGroup:'+ 新增計時器到此群組',
-    startTip:'開始', pauseTip:'暫停', loopTip:'循環', resetTip:'重設', delTip:'刪除',
-    startAllTip:'開始/暫停全部', loopAllTip:'循環全部', resetAllTip:'重設全部', delGroupTip:'刪除群組',
-    collapseTip:'收合/展開',
-    confirmDeleteGroup:'確定要刪除整個群組嗎？群組內所有計時器也會一併刪除。',
-    timeUpSuffix:' 時間到',
-    speechLang:'zh-TW',
-    announceLabelOnly:'只唸標籤', announceGroupLabel:'唸群組+標籤',
-  },
-  'zh-Hans': {
-    title:'多重倒计时器',
-    subtitle:'同时追踪多个目标，时间到自动语音提醒 —— 适合 LoL / Pokémon UNITE 等多目标游戏',
-    startAll:'▶ 全部开始', pauseAll:'⏸ 全部暂停', resetAll:'⟲ 全部重设',
-    addTimer:'+ 新增计时器', addGroup:'+ 新增群组',
-    voice:'🔊 语音提醒',
-    footer1:'点时间数字可直接输入新的分:秒（例如 8:50）。🔁 开启后时间到会自动重新倒数。群组可折叠成一行，折叠后点群组列的 ▶/🔁/⟲ 会套用到群组内<b>所有</b>计时器；折叠时内部栏位无法个别操作，展开后才能各自调整。',
-    footer2:'标签文字、时间与语音开关会存进浏览器 Cookie 永久保留，下次打开这个文件会自动还原。<b>注意：</b>如果是在 Claude 对话框内的预览画面使用，浏览器可能会封锁第三方 Cookie 而无法储存；请下载这个 HTML 文件后直接用浏览器打开，Cookie 才会正常运作。',
-    newTimerLabel:'新计时器', newGroupLabel:'新群组', addToGroup:'+ 新增计时器到此群组',
-    startTip:'开始', pauseTip:'暂停', loopTip:'循环', resetTip:'重设', delTip:'删除',
-    startAllTip:'开始/暂停全部', loopAllTip:'循环全部', resetAllTip:'重设全部', delGroupTip:'删除群组',
-    collapseTip:'折叠/展开',
-    confirmDeleteGroup:'确定要删除整个群组吗？群组内所有计时器也会一并删除。',
-    timeUpSuffix:' 时间到',
-    speechLang:'zh-TW',
-    announceLabelOnly:'只念标签', announceGroupLabel:'念群组+标签',
-  },
-  'en': {
-    title:'Multi Countdown Timer',
-    subtitle:'Track multiple objectives at once with voice alerts when time is up — great for LoL / Pokémon UNITE.',
-    startAll:'▶ Start All', pauseAll:'⏸ Pause All', resetAll:'⟲ Reset All',
-    addTimer:'+ Add Timer', addGroup:'+ Add Group',
-    voice:'🔊 Voice Alerts',
-    footer1:'Click the time to type a new mm:ss (e.g. 8:50). Turn on 🔁 to auto-restart when it hits zero. Groups can collapse into a single row — the ▶/🔁/⟲ on a collapsed group act on <b>every</b> timer inside it; individual timers can only be controlled once the group is expanded.',
-    footer2:'Labels, durations and the voice toggle are saved permanently in a browser cookie and restored next time you open this file. <b>Note:</b> if you are using the preview inside the Claude chat, the browser may block third-party cookies. Download this HTML file and open it directly in your browser for saving to work.',
-    newTimerLabel:'New Timer', newGroupLabel:'New Group', addToGroup:'+ Add Timer To Group',
-    startTip:'Start', pauseTip:'Pause', loopTip:'Loop', resetTip:'Reset', delTip:'Delete',
-    startAllTip:'Start/Pause All', loopAllTip:'Loop All', resetAllTip:'Reset All', delGroupTip:'Delete Group',
-    collapseTip:'Collapse/Expand',
-    confirmDeleteGroup:'Delete this whole group? All timers inside it will be removed too.',
-    timeUpSuffix:' time is up',
-    speechLang:'en-US',
-    announceLabelOnly:'Label Only', announceGroupLabel:'Group + Label',
-  },
-};
-function t(key){ return STR[currentLang][key]; }
-
-function applyStaticTranslations(){
-  document.title = t('title');
-  document.getElementById('uiTitle').textContent = t('title');
-  document.getElementById('uiSubtitle').textContent = t('subtitle');
-  document.getElementById('startAllBtn').textContent = t('startAll');
-  document.getElementById('pauseAllBtn').textContent = t('pauseAll');
-  document.getElementById('resetAllBtn').textContent = t('resetAll');
-  document.getElementById('addTimerBtn').textContent = t('addTimer');
-  document.getElementById('addGroupBtn').textContent = t('addGroup');
-  document.getElementById('uiVoiceLabel').textContent = t('voice');
-  document.getElementById('announceModeBtn').textContent = announceGroup ? t('announceGroupLabel') : t('announceLabelOnly');
-  document.getElementById('uiFooter1').innerHTML = t('footer1');
-  document.getElementById('uiFooter2').innerHTML = t('footer2');
-  document.documentElement.lang = currentLang;
-}
-
-let announceGroup = false;
-document.getElementById('announceModeBtn').addEventListener('click', () => {
-  announceGroup = !announceGroup;
-  document.getElementById('announceModeBtn').textContent = announceGroup ? t('announceGroupLabel') : t('announceLabelOnly');
-  saveCookie();
-});
-
-langBtn.addEventListener('click', () => {
-  const idx = LANGS.indexOf(currentLang);
-  currentLang = LANGS[(idx + 1) % LANGS.length];
-  langBtn.textContent = LANG_ABBR[currentLang];
-  applyStaticTranslations();
-  render();
-  saveCookie();
-});
-
-/* ---------------- audio / speech ---------------- */
-function ensureAudio(){
-  if(!audioCtx){ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-  if(audioCtx.state === 'suspended') audioCtx.resume();
-}
-function beep(){
-  try{
-    ensureAudio();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.0001;
-    o.connect(g); g.connect(audioCtx.destination);
-    const now = audioCtx.currentTime;
-    g.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-    o.start(now); o.stop(now + 0.55);
-  }catch(e){}
-}
-function speak(text){
-  if(!voiceToggle.checked) return;
-  if(!('speechSynthesis' in window)) return;
-  try{
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = STR[currentLang].speechLang;
-    u.rate = 1.05;
-    window.speechSynthesis.speak(u);
-  }catch(e){}
-}
-
-/* ---------------- time helpers ---------------- */
-function parseTime(str){
-  const parts = str.split(':').map(s => parseInt(s,10));
-  let m = 0, s = 0;
-  if(parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])){ m = parts[0]; s = parts[1]; }
-  else if(parts.length === 1 && !isNaN(parts[0])){ s = parts[0]; }
-  if(isNaN(m)) m = 0; if(isNaN(s)) s = 0;
-  return Math.max(0, m*60 + s);
-}
-function fmt(totalSec){
-  totalSec = Math.max(0, Math.round(totalSec));
-  const m = Math.floor(totalSec/60), s = totalSec % 60;
-  return m + ':' + String(s).padStart(2,'0');
-}
-
-/* ---------------- factories ---------------- */
-function nextColor(){ return COLORS[(colorIdx++) % COLORS.length]; }
-function createTimerObj(label, totalSec, parentGroupId){
-  return {
-    id:'t'+(idCounter++), kind:'timer', label, totalSec, remainingSec:totalSec,
-    running:false, loop:false, done:false, color:nextColor(),
-    lastTick:null, parentGroupId: parentGroupId || null,
-  };
-}
-function createGroupObj(label){
-  return { id:'g'+(idCounter++), kind:'group', label, collapsed:false, color:nextColor(), timers:[] };
-}
-function addTimer(label, totalSec){ items.push(createTimerObj(label, totalSec, null)); render(); }
-function addGroup(){ items.push(createGroupObj(t('newGroupLabel'))); render(); }
-function addTimerToGroup(g){
-  const nt = createTimerObj(t('newTimerLabel'), 300, g.id);
-  g.timers.push(nt); render();
-}
-function findGroup(gid){ return items.find(it => it.kind==='group' && it.id===gid); }
-function removeTimerAnywhere(tid){
-  items = items.filter(it => !(it.kind==='timer' && it.id===tid));
-  items.forEach(it => { if(it.kind==='group'){ it.timers = it.timers.filter(t2 => t2.id !== tid); } });
-  render();
-}
-function removeGroup(gid){
-  if(!confirm(t('confirmDeleteGroup'))) return;
-  items = items.filter(it => it.id !== gid);
-  render();
-}
-
-/* ---------------- batch actions ---------------- */
-function startTimerBatch(t2){
-  if(t2.remainingSec <= 0 || t2.done){ t2.remainingSec = t2.totalSec; }
-  t2.done = false; t2.running = true; t2.lastTick = performance.now();
-}
-function pauseTimerBatch(t2){ t2.running = false; }
-function resetTimerBatch(t2){ t2.running = false; t2.done = false; t2.remainingSec = t2.totalSec; }
-function flattenAll(){
-  let all = [];
-  items.forEach(it => { if(it.kind==='timer') all.push(it); else all.push(...it.timers); });
-  return all;
-}
-function batchStart(list){ list.forEach(t2 => startTimerBatch(t2)); }
-function batchPause(list){ list.forEach(t2 => pauseTimerBatch(t2)); }
-function batchReset(list){ list.forEach(t2 => resetTimerBatch(t2)); }
-function batchToggleStart(list){ list.some(t2 => t2.running) ? batchPause(list) : batchStart(list); }
-function batchToggleLoop(list){
-  const allOn = list.length > 0 && list.every(t2 => t2.loop);
-  list.forEach(t2 => { t2.loop = !allOn; });
-}
-
-/* ---------------- cookie persistence ---------------- */
-function saveCookie(){
-  const data = {
-    voice: voiceToggle.checked,
-    announceGroup: announceGroup,
-    lang: currentLang,
-    items: items.map(it => it.kind==='timer'
-      ? { kind:'timer', label: it.label, totalSec: it.totalSec }
-      : { kind:'group', label: it.label, timers: it.timers.map(x => ({label:x.label, totalSec:x.totalSec})) }
-    )
-  };
-  const json = JSON.stringify(data);
-  const d = new Date(); d.setFullYear(d.getFullYear() + 10);
-  document.cookie = 'multiTimerData=' + encodeURIComponent(json) + '; expires=' + d.toUTCString() + '; path=/; SameSite=Lax';
-}
-function loadCookie(){
-  const m = document.cookie.match(/(?:^|; )multiTimerData=([^;]*)/);
-  if(!m) return null;
-  try{ return JSON.parse(decodeURIComponent(m[1])); }catch(e){ return null; }
-}
-
-/* ---------------- column split ---------------- */
-function splitColumns(arr){
-  const n = arr.length;
-  if(n === 0) return [[],[]];
-  let leftCount = n <= 20 ? Math.min(10, n) : Math.ceil(n/2);
-  return [arr.slice(0, leftCount), arr.slice(leftCount)];
-}
-
-/* ---------------- live visual update ---------------- */
-function applyRowVisual(el, t2){
-  if(!el) return;
-  const timeDisplay = el.querySelector('.time-display');
-  const timeInput = el.querySelector('.time-input');
-  if(t2.running || t2.done){
-    timeDisplay.style.display = 'block'; timeInput.style.display = 'none';
-    timeDisplay.textContent = fmt(t2.remainingSec);
-  } else {
-    timeDisplay.style.display = 'none'; timeInput.style.display = 'block';
-  }
-  el.classList.toggle('done', t2.done);
-  const startBtn = el.querySelector('.start-btn');
-  startBtn.textContent = t2.running ? '⏸' : '▶';
-  startBtn.title = t2.running ? t('pauseTip') : t('startTip');
-  startBtn.classList.toggle('active', t2.running);
-  el.querySelector('.loop-btn').classList.toggle('active', t2.loop);
-}
-function updateRowVisual(t2){
-  applyRowVisual(document.getElementById('row-' + t2.id), t2);
-}
-function updateGroupBadge(g){
-  const el = document.getElementById('groupcount-' + g.id);
-  if(!el) return;
-  const runningCount = g.timers.filter(t2 => t2.running).length;
-  el.textContent = g.timers.length + (runningCount > 0 ? ' · ▶' + runningCount : '');
-}
-function flashGroupHeader(gid){
-  const el = document.getElementById('groupheader-' + gid);
-  if(!el) return;
-  el.classList.add('flash-alert');
-  setTimeout(() => el.classList.remove('flash-alert'), 1600);
-}
-
-/* ---------------- ticking ---------------- */
-function tick(now){
-  flattenAll().forEach(t2 => {
-    if(t2.running){
-      const dt = (now - t2.lastTick) / 1000;
-      t2.lastTick = now;
-      t2.remainingSec -= dt;
-      if(t2.remainingSec <= 0){
-        t2.remainingSec = 0; t2.running = false; t2.done = true;
-        beep();
-        const g0 = t2.parentGroupId ? findGroup(t2.parentGroupId) : null;
-        const spokenLabel = (announceGroup && g0) ? (g0.label + ' ' + t2.label) : t2.label;
-        speak(spokenLabel + STR[currentLang].timeUpSuffix);
-        if(t2.parentGroupId){
-          const g = findGroup(t2.parentGroupId);
-          if(g && g.collapsed) flashGroupHeader(g.id);
-        }
-        if(t2.loop){
-          setTimeout(() => {
-            t2.remainingSec = t2.totalSec; t2.done = false; t2.running = true; t2.lastTick = performance.now();
-            updateRowVisual(t2);
-          }, 900);
-        }
-      }
-      updateRowVisual(t2);
-    }
-  });
-  items.forEach(it => { if(it.kind==='group') updateGroupBadge(it); });
-  requestAnimationFrame(tick);
-}
-requestAnimationFrame(tick);
-
-/* ---------------- DOM builders ---------------- */
-function buildTimerRow(t2, colorOverride, nested){
-  const row = document.createElement('div');
-  row.className = 'row' + (nested ? ' nested' : '');
-  row.id = 'row-' + t2.id;
-  row.style.setProperty('--row-color', colorOverride || t2.color);
-  row.innerHTML = `
-    <input class="label-input" value="${t2.label}" maxlength="20">
-    <div style="position:relative;">
-      <span class="time-display">${fmt(t2.remainingSec)}</span>
-      <input class="time-input" value="${fmt(t2.totalSec)}" style="display:none">
-    </div>
-    <button class="icon-btn start-btn" title="${t('startTip')}">▶</button>
-    <button class="icon-btn loop-btn" title="${t('loopTip')}">🔁</button>
-    <button class="icon-btn reset-btn" title="${t('resetTip')}">⟲</button>
-    <button class="del-btn" title="${t('delTip')}">✕</button>
-  `;
-
-  const labelInput = row.querySelector('.label-input');
-  labelInput.addEventListener('input', () => { t2.label = labelInput.value || t('newTimerLabel'); });
-  labelInput.addEventListener('change', () => { saveCookie(); });
-
-  const timeInput = row.querySelector('.time-input');
-  timeInput.addEventListener('input', () => {
-    const secs = parseTime(timeInput.value);
-    t2.totalSec = secs; t2.remainingSec = secs;
-  });
-  timeInput.addEventListener('change', () => { timeInput.value = fmt(t2.totalSec); saveCookie(); });
-
-  row.querySelector('.start-btn').addEventListener('click', () => {
-    ensureAudio();
-    if(t2.running){ pauseTimerBatch(t2); } else { startTimerBatch(t2); }
-    updateRowVisual(t2);
-  });
-  row.querySelector('.reset-btn').addEventListener('click', () => {
-    resetTimerBatch(t2); updateRowVisual(t2); timeInput.value = fmt(t2.totalSec);
-  });
-  row.querySelector('.loop-btn').addEventListener('click', () => { t2.loop = !t2.loop; updateRowVisual(t2); });
-  row.querySelector('.del-btn').addEventListener('click', () => removeTimerAnywhere(t2.id));
-
-  applyRowVisual(row, t2);
-  return row;
-}
-
-function buildGroupBlock(g){
-  const wrap = document.createElement('div');
-  wrap.className = 'group-block';
-
-  const anyRunning = g.timers.some(t2 => t2.running);
-  const allLooping = g.timers.length > 0 && g.timers.every(t2 => t2.loop);
-
-  const header = document.createElement('div');
-  header.className = 'group-header';
-  header.id = 'groupheader-' + g.id;
-  header.style.setProperty('--row-color', g.color);
-  header.innerHTML = `
-    <button class="collapse-btn" title="${t('collapseTip')}">${g.collapsed ? '▸' : '▾'}</button>
-    <input class="group-label-input" value="${g.label}" maxlength="24">
-    <span class="group-count" id="groupcount-${g.id}">${g.timers.length}${anyRunning ? ' · ▶' + g.timers.filter(t2=>t2.running).length : ''}</span>
-    <button class="icon-btn start-btn ${anyRunning ? 'active' : ''}" title="${t('startAllTip')}">${anyRunning ? '⏸' : '▶'}</button>
-    <button class="icon-btn loop-btn ${allLooping ? 'active' : ''}" title="${t('loopAllTip')}">🔁</button>
-    <button class="icon-btn reset-btn" title="${t('resetAllTip')}">⟲</button>
-    <button class="del-btn" title="${t('delGroupTip')}">✕</button>
-  `;
-  wrap.appendChild(header);
-
-  header.querySelector('.collapse-btn').addEventListener('click', () => { g.collapsed = !g.collapsed; render(); });
-  const glabel = header.querySelector('.group-label-input');
-  glabel.addEventListener('input', () => { g.label = glabel.value || t('newGroupLabel'); });
-  glabel.addEventListener('change', () => { saveCookie(); });
-  header.querySelector('.start-btn').addEventListener('click', () => {
-    ensureAudio();
-    batchToggleStart(g.timers);
-    render();
-  });
-  header.querySelector('.loop-btn').addEventListener('click', () => {
-    batchToggleLoop(g.timers);
-    render();
-  });
-  header.querySelector('.reset-btn').addEventListener('click', () => {
-    batchReset(g.timers);
-    render();
-  });
-  header.querySelector('.del-btn').addEventListener('click', () => removeGroup(g.id));
-
-  if(!g.collapsed){
-    const members = document.createElement('div');
-    members.className = 'group-members';
-    g.timers.forEach(t2 => members.appendChild(buildTimerRow(t2, g.color, true)));
-    const addTile = document.createElement('div');
-    addTile.className = 'add-to-group';
-    addTile.textContent = t('addToGroup');
-    addTile.addEventListener('click', () => addTimerToGroup(g));
-    members.appendChild(addTile);
-    wrap.appendChild(members);
-  }
-
-  return wrap;
-}
-
-/* ---------------- full render ---------------- */
-function buildItemEl(it){
-  return it.kind === 'timer' ? buildTimerRow(it, null, false) : buildGroupBlock(it);
-}
-function render(){
-  colLeft.innerHTML = ''; colRight.innerHTML = '';
-  const [leftItems, rightItems] = splitColumns(items);
-  leftItems.forEach(it => colLeft.appendChild(buildItemEl(it)));
-  rightItems.forEach(it => colRight.appendChild(buildItemEl(it)));
-  saveCookie();
-}
-
-/* ---------------- toolbar ---------------- */
-document.getElementById('startAllBtn').addEventListener('click', () => {
-  ensureAudio();
-  batchStart(flattenAll());
-  render();
-});
-document.getElementById('pauseAllBtn').addEventListener('click', () => {
-  batchPause(flattenAll());
-  render();
-});
-document.getElementById('resetAllBtn').addEventListener('click', () => {
-  batchReset(flattenAll());
-  render();
-});
-document.getElementById('addTimerBtn').addEventListener('click', () => addTimer(t('newTimerLabel'), 300));
-document.getElementById('addGroupBtn').addEventListener('click', () => addGroup());
-voiceToggle.addEventListener('change', () => saveCookie());
-
-/* ---------------- init ---------------- */
-(function init(){
-  const saved = loadCookie();
-  if(saved && saved.lang && LANGS.includes(saved.lang)){ currentLang = saved.lang; }
-  applyStaticTranslations();
-  langBtn.textContent = LANG_ABBR[currentLang];
-
-  if(saved && Array.isArray(saved.items) && saved.items.length){
-    voiceToggle.checked = saved.voice !== false;
-    announceGroup = saved.announceGroup === true;
-    document.getElementById('announceModeBtn').textContent = announceGroup ? t('announceGroupLabel') : t('announceLabelOnly');
-    saved.items.forEach(it => {
-      if(it.kind === 'group'){
-        const g = createGroupObj(it.label || t('newGroupLabel'));
-        (it.timers || []).forEach(tt => g.timers.push(createTimerObj(tt.label || t('newTimerLabel'), tt.totalSec || 300, g.id)));
-        items.push(g);
-      } else {
-        items.push(createTimerObj(it.label || t('newTimerLabel'), it.totalSec || 300, null));
-      }
-    });
-    render();
-  } else {
-    addTimer('目標 1', 8*60+50);
-    addTimer('目標 2', 7*60+20);
-    addTimer('目標 3', 8*60+0);
-  }
-})();
-</script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
