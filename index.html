@@ -438,8 +438,7 @@ function splitColumns(arr){
 }
 
 /* ---------------- live visual update ---------------- */
-function updateRowVisual(t2){
-  const el = document.getElementById('row-' + t2.id);
+function applyRowVisual(el, t2){
   if(!el) return;
   const timeDisplay = el.querySelector('.time-display');
   const timeInput = el.querySelector('.time-input');
@@ -455,6 +454,9 @@ function updateRowVisual(t2){
   startBtn.title = t2.running ? t('pauseTip') : t('startTip');
   startBtn.classList.toggle('active', t2.running);
   el.querySelector('.loop-btn').classList.toggle('active', t2.loop);
+}
+function updateRowVisual(t2){
+  applyRowVisual(document.getElementById('row-' + t2.id), t2);
 }
 function updateGroupBadge(g){
   const el = document.getElementById('groupcount-' + g.id);
@@ -538,7 +540,7 @@ function buildTimerRow(t2, colorOverride, nested){
   row.querySelector('.loop-btn').addEventListener('click', () => { t2.loop = !t2.loop; updateRowVisual(t2); });
   row.querySelector('.del-btn').addEventListener('click', () => removeTimerAnywhere(t2.id));
 
-  updateRowVisual(t2);
+  applyRowVisual(row, t2);
   return row;
 }
 
