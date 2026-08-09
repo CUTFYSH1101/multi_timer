@@ -334,6 +334,7 @@ langBtn.addEventListener('click', () => {
   langBtn.textContent = LANG_ABBR[currentLang];
   applyStaticTranslations();
   render();
+  saveCookie();
 });
 
 /* ---------------- audio / speech ---------------- */
@@ -411,17 +412,25 @@ function removeGroup(gid){
   render();
 }
 
-/* ---------------- bulk actions ---------------- */
-function startTimerBulk(t2){
+/* ---------------- batch actions ---------------- */
+function startTimerBatch(t2){
   if(t2.remainingSec <= 0 || t2.done){ t2.remainingSec = t2.totalSec; }
   t2.done = false; t2.running = true; t2.lastTick = performance.now();
 }
-function pauseTimerBulk(t2){ t2.running = false; }
-function resetTimerBulk(t2){ t2.running = false; t2.done = false; t2.remainingSec = t2.totalSec; }
+function pauseTimerBatch(t2){ t2.running = false; }
+function resetTimerBatch(t2){ t2.running = false; t2.done = false; t2.remainingSec = t2.totalSec; }
 function flattenAll(){
   let all = [];
   items.forEach(it => { if(it.kind==='timer') all.push(it); else all.push(...it.timers); });
   return all;
+}
+function batchStart(list){ list.forEach(t2 => startTimerBatch(t2)); }
+function batchPause(list){ list.forEach(t2 => pauseTimerBatch(t2)); }
+function batchReset(list){ list.forEach(t2 => resetTimerBatch(t2)); }
+function batchToggleStart(list){ list.some(t2 => t2.running) ? batchPause(list) : batchStart(list); }
+function batchToggleLoop(list){
+  const allOn = list.length > 0 && list.every(t2 => t2.loop);
+  list.forEach(t2 => { t2.loop = !allOn; });
 }
 
 /* ---------------- cookie persistence ---------------- */
@@ -429,6 +438,7 @@ function saveCookie(){
   const data = {
     voice: voiceToggle.checked,
     announceGroup: announceGroup,
+    lang: currentLang,
     items: items.map(it => it.kind==='timer'
       ? { kind:'timer', label: it.label, totalSec: it.totalSec }
       : { kind:'group', label: it.label, timers: it.timers.map(x => ({label:x.label, totalSec:x.totalSec})) }
@@ -549,11 +559,11 @@ function buildTimerRow(t2, colorOverride, nested){
 
   row.querySelector('.start-btn').addEventListener('click', () => {
     ensureAudio();
-    if(t2.running){ pauseTimerBulk(t2); } else { startTimerBulk(t2); }
+    if(t2.running){ pauseTimerBatch(t2); } else { startTimerBatch(t2); }
     updateRowVisual(t2);
   });
   row.querySelector('.reset-btn').addEventListener('click', () => {
-    resetTimerBulk(t2); updateRowVisual(t2); timeInput.value = fmt(t2.totalSec);
+    resetTimerBatch(t2); updateRowVisual(t2); timeInput.value = fmt(t2.totalSec);
   });
   row.querySelector('.loop-btn').addEventListener('click', () => { t2.loop = !t2.loop; updateRowVisual(t2); });
   row.querySelector('.del-btn').addEventListener('click', () => removeTimerAnywhere(t2.id));
@@ -590,17 +600,15 @@ function buildGroupBlock(g){
   glabel.addEventListener('change', () => { saveCookie(); });
   header.querySelector('.start-btn').addEventListener('click', () => {
     ensureAudio();
-    const running = g.timers.some(t2 => t2.running);
-    g.timers.forEach(t2 => running ? pauseTimerBulk(t2) : startTimerBulk(t2));
+    batchToggleStart(g.timers);
     render();
   });
   header.querySelector('.loop-btn').addEventListener('click', () => {
-    const allOn = g.timers.length > 0 && g.timers.every(t2 => t2.loop);
-    g.timers.forEach(t2 => { t2.loop = !allOn; });
+    batchToggleLoop(g.timers);
     render();
   });
   header.querySelector('.reset-btn').addEventListener('click', () => {
-    g.timers.forEach(t2 => resetTimerBulk(t2));
+    batchReset(g.timers);
     render();
   });
   header.querySelector('.del-btn').addEventListener('click', () => removeGroup(g.id));
@@ -621,26 +629,29 @@ function buildGroupBlock(g){
 }
 
 /* ---------------- full render ---------------- */
+function buildItemEl(it){
+  return it.kind === 'timer' ? buildTimerRow(it, null, false) : buildGroupBlock(it);
+}
 function render(){
   colLeft.innerHTML = ''; colRight.innerHTML = '';
   const [leftItems, rightItems] = splitColumns(items);
-  leftItems.forEach(it => colLeft.appendChild(it.kind==='timer' ? buildTimerRow(it, null, false) : buildGroupBlock(it)));
-  rightItems.forEach(it => colRight.appendChild(it.kind==='timer' ? buildTimerRow(it, null, false) : buildGroupBlock(it)));
+  leftItems.forEach(it => colLeft.appendChild(buildItemEl(it)));
+  rightItems.forEach(it => colRight.appendChild(buildItemEl(it)));
   saveCookie();
 }
 
 /* ---------------- toolbar ---------------- */
 document.getElementById('startAllBtn').addEventListener('click', () => {
   ensureAudio();
-  flattenAll().forEach(t2 => startTimerBulk(t2));
+  batchStart(flattenAll());
   render();
 });
 document.getElementById('pauseAllBtn').addEventListener('click', () => {
-  flattenAll().forEach(t2 => pauseTimerBulk(t2));
+  batchPause(flattenAll());
   render();
 });
 document.getElementById('resetAllBtn').addEventListener('click', () => {
-  flattenAll().forEach(t2 => resetTimerBulk(t2));
+  batchReset(flattenAll());
   render();
 });
 document.getElementById('addTimerBtn').addEventListener('click', () => addTimer(t('newTimerLabel'), 300));
@@ -649,10 +660,11 @@ voiceToggle.addEventListener('change', () => saveCookie());
 
 /* ---------------- init ---------------- */
 (function init(){
+  const saved = loadCookie();
+  if(saved && saved.lang && LANGS.includes(saved.lang)){ currentLang = saved.lang; }
   applyStaticTranslations();
   langBtn.textContent = LANG_ABBR[currentLang];
 
-  const saved = loadCookie();
   if(saved && Array.isArray(saved.items) && saved.items.length){
     voiceToggle.checked = saved.voice !== false;
     announceGroup = saved.announceGroup === true;
