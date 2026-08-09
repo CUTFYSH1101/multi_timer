@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>多重倒數計時器</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -215,6 +216,7 @@
     <button class="btn-group" id="addGroupBtn">+ 新增群組</button>
     <button class="btn-lang" id="langBtn" title="切換語言 / 切换语言 / Switch language">繁</button>
     <div class="spacer"></div>
+    <button class="btn-ghost" id="announceModeBtn">只唸標籤</button>
     <label class="voice-toggle">
       <input type="checkbox" id="voiceToggle" checked>
       <span id="uiVoiceLabel">🔊 語音提醒</span>
@@ -264,6 +266,7 @@ const STR = {
     confirmDeleteGroup:'確定要刪除整個群組嗎？群組內所有計時器也會一併刪除。',
     timeUpSuffix:' 時間到',
     speechLang:'zh-TW',
+    announceLabelOnly:'只唸標籤', announceGroupLabel:'唸群組+標籤',
   },
   'zh-Hans': {
     title:'多重倒计时器',
@@ -280,6 +283,7 @@ const STR = {
     confirmDeleteGroup:'确定要删除整个群组吗？群组内所有计时器也会一并删除。',
     timeUpSuffix:' 时间到',
     speechLang:'zh-TW',
+    announceLabelOnly:'只念标签', announceGroupLabel:'念群组+标签',
   },
   'en': {
     title:'Multi Countdown Timer',
@@ -296,11 +300,13 @@ const STR = {
     confirmDeleteGroup:'Delete this whole group? All timers inside it will be removed too.',
     timeUpSuffix:' time is up',
     speechLang:'en-US',
+    announceLabelOnly:'Label Only', announceGroupLabel:'Group + Label',
   },
 };
 function t(key){ return STR[currentLang][key]; }
 
 function applyStaticTranslations(){
+  document.title = t('title');
   document.getElementById('uiTitle').textContent = t('title');
   document.getElementById('uiSubtitle').textContent = t('subtitle');
   document.getElementById('startAllBtn').textContent = t('startAll');
@@ -309,10 +315,18 @@ function applyStaticTranslations(){
   document.getElementById('addTimerBtn').textContent = t('addTimer');
   document.getElementById('addGroupBtn').textContent = t('addGroup');
   document.getElementById('uiVoiceLabel').textContent = t('voice');
+  document.getElementById('announceModeBtn').textContent = announceGroup ? t('announceGroupLabel') : t('announceLabelOnly');
   document.getElementById('uiFooter1').innerHTML = t('footer1');
   document.getElementById('uiFooter2').innerHTML = t('footer2');
   document.documentElement.lang = currentLang;
 }
+
+let announceGroup = false;
+document.getElementById('announceModeBtn').addEventListener('click', () => {
+  announceGroup = !announceGroup;
+  document.getElementById('announceModeBtn').textContent = announceGroup ? t('announceGroupLabel') : t('announceLabelOnly');
+  saveCookie();
+});
 
 langBtn.addEventListener('click', () => {
   const idx = LANGS.indexOf(currentLang);
@@ -414,6 +428,7 @@ function flattenAll(){
 function saveCookie(){
   const data = {
     voice: voiceToggle.checked,
+    announceGroup: announceGroup,
     items: items.map(it => it.kind==='timer'
       ? { kind:'timer', label: it.label, totalSec: it.totalSec }
       : { kind:'group', label: it.label, timers: it.timers.map(x => ({label:x.label, totalSec:x.totalSec})) }
@@ -480,7 +495,10 @@ function tick(now){
       t2.remainingSec -= dt;
       if(t2.remainingSec <= 0){
         t2.remainingSec = 0; t2.running = false; t2.done = true;
-        beep(); speak(t2.label + STR[currentLang].timeUpSuffix);
+        beep();
+        const g0 = t2.parentGroupId ? findGroup(t2.parentGroupId) : null;
+        const spokenLabel = (announceGroup && g0) ? (g0.label + ' ' + t2.label) : t2.label;
+        speak(spokenLabel + STR[currentLang].timeUpSuffix);
         if(t2.parentGroupId){
           const g = findGroup(t2.parentGroupId);
           if(g && g.collapsed) flashGroupHeader(g.id);
@@ -637,6 +655,8 @@ voiceToggle.addEventListener('change', () => saveCookie());
   const saved = loadCookie();
   if(saved && Array.isArray(saved.items) && saved.items.length){
     voiceToggle.checked = saved.voice !== false;
+    announceGroup = saved.announceGroup === true;
+    document.getElementById('announceModeBtn').textContent = announceGroup ? t('announceGroupLabel') : t('announceLabelOnly');
     saved.items.forEach(it => {
       if(it.kind === 'group'){
         const g = createGroupObj(it.label || t('newGroupLabel'));
