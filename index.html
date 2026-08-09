@@ -57,6 +57,7 @@
   button:active{transform:scale(0.95);}
   .btn-primary{background:var(--accent1); color:#04231D;}
   .btn-primary:hover{filter:brightness(1.08);}
+  .btn-primary.active{background:var(--accent2);}
   .btn-group{background:var(--accent3); color:#22093B;}
   .btn-group:hover{filter:brightness(1.08);}
   .btn-lang{background:var(--accent5); color:#071A33; min-width:44px; text-align:center; font-family:'Chakra Petch',monospace; letter-spacing:.03em;}
@@ -221,8 +222,7 @@
   </header>
 
   <div class="toolbar">
-    <button class="btn-primary" id="startAllBtn">▶ 全部開始</button>
-    <button class="btn-ghost" id="pauseAllBtn">⏸ 全部暫停</button>
+    <button class="btn-primary" id="toggleAllBtn">▶ 全部開始</button>
     <button class="btn-ghost" id="resetAllBtn">⟲ 全部重設</button>
     <button class="btn-ghost" id="addTimerBtn">+ 新增計時器</button>
     <button class="btn-group" id="addGroupBtn">+ 新增群組</button>

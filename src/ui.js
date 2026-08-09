@@ -59,8 +59,7 @@ export function createUI(config) {
     doc.title = tr('title');
     el('uiTitle').textContent = tr('title');
     el('uiSubtitle').textContent = tr('subtitle');
-    el('startAllBtn').textContent = tr('startAll');
-    el('pauseAllBtn').textContent = tr('pauseAll');
+    updateToggleAllButton();
     el('resetAllBtn').textContent = tr('resetAll');
     el('addTimerBtn').textContent = tr('addTimer');
     el('addGroupBtn').textContent = tr('addGroup');
@@ -78,8 +77,11 @@ export function createUI(config) {
     if (!row) return;
     const timeDisplay = row.querySelector('.time-display');
     const timeInput = row.querySelector('.time-input');
-    const active = timer.running || timer.done || timer.restartAt !== null;
-    if (active) {
+    const counting = timer.running || timer.done || timer.restartAt !== null;
+    // 暫停但還沒重設回滿血：也用唯讀的剩餘時間顯示，不要秀出可編輯的總時長輸入框，
+    // 否則暫停時看到的數字（總時長）會跟實際剩下的時間對不上。
+    const pausedMidway = !counting && timer.remainingSec !== timer.totalSec;
+    if (counting || pausedMidway) {
       timeDisplay.style.display = 'block';
       timeInput.style.display = 'none';
       timeDisplay.textContent = fmt(timer.remainingSec);
@@ -105,6 +107,15 @@ export function createUI(config) {
     if (!badge) return;
     const running = group.timers.filter(x => x.running).length;
     badge.textContent = group.timers.length + (running > 0 ? ' · ▶' + running : '');
+  }
+
+  function updateToggleAllButton() {
+    const btn = el('toggleAllBtn');
+    if (!btn) return;
+    const anyActive = store.flatten().some(x => x.running || x.restartAt !== null);
+    btn.textContent = anyActive ? tr('pauseAll') : tr('startAll');
+    btn.title = tr('startAllTip'); // 這顆本來就是「開始/暫停全部」共用一個提示
+    btn.classList.toggle('active', anyActive);
   }
 
   function flashGroupHeader(gid) {
@@ -256,11 +267,13 @@ export function createUI(config) {
     const build = it => (it.kind === 'timer' ? buildTimerRow(it, null, false) : buildGroupBlock(it));
     left.forEach(it => colLeft.appendChild(build(it)));
     right.forEach(it => colRight.appendChild(build(it)));
+    updateToggleAllButton();
     save();
   }
 
   function refreshBadges() {
     store.items.forEach(it => { if (it.kind === 'group') updateGroupBadge(it); });
+    updateToggleAllButton();
   }
 
   /* ---------------- 時間推進 ---------------- */
@@ -291,8 +304,11 @@ export function createUI(config) {
   /* ---------------- 工具列 ---------------- */
 
   function wireToolbar() {
-    el('startAllBtn').addEventListener('click', () => { ensureAudio(); store.batchStart(store.flatten()); render(); });
-    el('pauseAllBtn').addEventListener('click', () => { store.batchPause(store.flatten()); render(); });
+    el('toggleAllBtn').addEventListener('click', () => {
+      ensureAudio();
+      store.batchToggleStart(store.flatten());
+      render();
+    });
     el('resetAllBtn').addEventListener('click', () => { store.batchReset(store.flatten()); speaker.stop(); render(); });
     el('addTimerBtn').addEventListener('click', () => { store.addTimer(tr('newTimerLabel')); render(); });
     el('addGroupBtn').addEventListener('click', () => { store.addGroup(tr('newGroupLabel')); render(); });
