@@ -3,10 +3,19 @@
 import { STR, LANG_ABBR, t, nextLang, isLang } from './i18n.js';
 import { fmt, parseTime } from './time.js';
 import { splitColumns } from './layout.js';
-import { announcementFor } from './announcer.js';
+import { announcementFor, nextAnnounceMode, ANNOUNCE_MODES } from './announcer.js';
 import { createSettingsPanel } from './settingsui.js';
 
 const TICK_MS = 200;
+
+/** 播報模式 → 按鈕文案的 i18n key */
+const ANNOUNCE_MODE_KEY = {
+  label: 'announceLabelOnly',
+  group: 'announceSubGroupLabel',
+  mother: 'announceMotherLabel',
+  motherGroup: 'announceMotherSubLabel',
+  all: 'announceAllLabel',
+};
 
 export function createUI(config) {
   const {
@@ -20,11 +29,11 @@ export function createUI(config) {
     alertFn = () => {},
     lang: initialLang = 'zh-Hant',
     voice: initialVoice = true,
-    announceGroup: initialAnnounceGroup = false,
+    announceMode: initialAnnounceMode = 'label',
   } = config;
 
   let lang = isLang(initialLang) ? initialLang : 'zh-Hant';
-  let announceGroup = initialAnnounceGroup;
+  let announceMode = ANNOUNCE_MODES.includes(initialAnnounceMode) ? initialAnnounceMode : 'label';
   let clockId = null;
   let keyHandler = null;
 
@@ -35,6 +44,7 @@ export function createUI(config) {
   const langBtn = el('langBtn');
   const announceBtn = el('announceModeBtn');
   const saveWarn = el('saveWarn');
+  const addSuperGroupBtn = el('addSuperGroupBtn');
 
   voiceToggle.checked = initialVoice !== false;
 
@@ -45,7 +55,7 @@ export function createUI(config) {
   function save() {
     const result = cookieStore.save({
       voice: voiceToggle.checked,
-      announceGroup,
+      announceMode,
       lang,
       items: store.toJSON(),
       ...store.extrasJSON(),
@@ -77,8 +87,9 @@ export function createUI(config) {
     el('resetAllBtn').textContent = tr('resetAll');
     el('addTimerBtn').textContent = tr('addTimer');
     el('addGroupBtn').textContent = tr('addGroup');
+    if (addSuperGroupBtn) addSuperGroupBtn.textContent = tr('addSuperGroup');
     el('uiVoiceLabel').textContent = tr('voice');
-    announceBtn.textContent = announceGroup ? tr('announceGroupLabel') : tr('announceLabelOnly');
+    announceBtn.textContent = tr(ANNOUNCE_MODE_KEY[announceMode]);
     el('uiFooter1').innerHTML = tr('footer1');
     el('uiFooter2').innerHTML = tr('footer2');
     const f3 = el('uiFooter3');
@@ -154,6 +165,14 @@ export function createUI(config) {
     if (!badge) return;
     const running = group.timers.filter(x => x.running).length;
     badge.textContent = group.timers.length + (running > 0 ? ' · ▶' + running : '');
+  }
+
+  function updateSuperGroupBadge(supergroup) {
+    const badge = doc.getElementById('groupcount-' + supergroup.id);
+    if (!badge) return;
+    const allTimers = supergroup.groups.flatMap(g => g.timers);
+    const running = allTimers.filter(x => x.running).length;
+    badge.textContent = allTimers.length + (running > 0 ? ' · ▶' + running : '');
   }
 
   function updateToggleAllButton() {
@@ -279,9 +298,13 @@ export function createUI(config) {
     return bar;
   }
 
-  function buildGroupBlock(group) {
+  /**
+   * 群組區塊。nestedInSuper=true 表示這個群組是巢狀在母群組底下的子群組——
+   * 邏輯、按鈕、事件完全一樣，只多一個縮排用的 CSS class。
+   */
+  function buildGroupBlock(group, nestedInSuper) {
     const wrap = doc.createElement('div');
-    wrap.className = 'group-block';
+    wrap.className = 'group-block' + (nestedInSuper ? ' subgroup' : '');
 
     const anyRunning = group.timers.some(x => x.running);
     const allLooping = group.timers.length > 0 && group.timers.every(x => x.loop);
@@ -316,7 +339,8 @@ export function createUI(config) {
     glabel.addEventListener('input', () => { group.label = glabel.value || tr('newGroupLabel'); });
     glabel.addEventListener('change', save);
 
-    // 群組靜音蓋過單元靜音：勾了群組，底下全部這輪都不唸
+    // 群組靜音蓋過單元靜音：勾了群組，底下全部這輪都不唸。子群組即使在循環中，
+    // 這顆鈕一樣可以手動點——手動點只是暫時覆蓋目前循環指到的位置，不會壞掉。
     header.querySelector('.mute-btn').addEventListener('click', () => {
       store.toggleMute(group);
       updateMuteVisual(group);
@@ -364,13 +388,96 @@ export function createUI(config) {
     return wrap;
   }
 
+  /**
+   * 母群組區塊：外觀跟群組一致的 header，底下塞每個子群組（用 buildGroupBlock 巢狀顯示）。
+   * 母群組本身沒有靜音鈕——靜音狀態完全體現在子群組的 🔊/🔇 上，快捷鍵循環也是切子群組。
+   */
+  function buildSuperGroupBlock(supergroup) {
+    const wrap = doc.createElement('div');
+    wrap.className = 'group-block supergroup-block';
+
+    const allTimers = supergroup.groups.flatMap(g => g.timers);
+    const anyRunning = allTimers.some(x => x.running);
+    const allLooping = allTimers.length > 0 && allTimers.every(x => x.loop);
+    const runningCount = allTimers.filter(x => x.running).length;
+
+    const header = doc.createElement('div');
+    header.className = 'group-header supergroup-header';
+    header.id = 'groupheader-' + supergroup.id;
+    header.style.setProperty('--row-color', supergroup.color);
+    header.innerHTML =
+      '<button class="collapse-btn">' + (supergroup.collapsed ? '▸' : '▾') + '</button>' +
+      '<input class="group-label-input" maxlength="24">' +
+      '<span class="hotkey-badge"></span>' +
+      '<span class="group-count" id="groupcount-' + supergroup.id + '"></span>' +
+      '<button class="icon-btn start-btn' + (anyRunning ? ' active' : '') + '">' + (anyRunning ? '⏸' : '▶') + '</button>' +
+      '<button class="icon-btn loop-btn' + (allLooping ? ' active' : '') + '">🔁</button>' +
+      '<button class="icon-btn reset-btn">⟲</button>' +
+      '<button class="del-btn">✕</button>';
+    wrap.appendChild(header);
+
+    header.querySelector('.group-count').textContent =
+      allTimers.length + (runningCount > 0 ? ' · ▶' + runningCount : '');
+    header.querySelector('.hotkey-badge').textContent = supergroup.hotkey ? '[' + supergroup.hotkey + ']' : '';
+
+    const collapseBtn = header.querySelector('.collapse-btn');
+    collapseBtn.title = tr('collapseTip');
+    collapseBtn.addEventListener('click', () => { supergroup.collapsed = !supergroup.collapsed; render(); });
+
+    const glabel = header.querySelector('.group-label-input');
+    glabel.value = supergroup.label;
+    glabel.addEventListener('input', () => { supergroup.label = glabel.value || tr('newSuperGroupLabel'); });
+    glabel.addEventListener('change', save);
+
+    const startBtn = header.querySelector('.start-btn');
+    startBtn.title = tr('startAllTip');
+    startBtn.addEventListener('click', () => { ensureAudio(); store.batchToggleStart(allTimers); render(); });
+
+    const loopBtn = header.querySelector('.loop-btn');
+    loopBtn.title = tr('loopAllTip');
+    loopBtn.addEventListener('click', () => { store.batchToggleLoop(allTimers); render(); });
+
+    const resetBtn = header.querySelector('.reset-btn');
+    resetBtn.title = tr('resetAllTip');
+    resetBtn.addEventListener('click', () => { store.resetSuperGroup(supergroup); render(); });
+
+    const delBtn = header.querySelector('.del-btn');
+    delBtn.title = tr('delSuperGroupTip');
+    delBtn.addEventListener('click', () => {
+      if (!confirmFn(tr('confirmDeleteSuperGroup'))) return;
+      store.removeSuperGroup(supergroup.id);
+      render();
+    });
+
+    if (!supergroup.collapsed) {
+      const members = doc.createElement('div');
+      members.className = 'group-members supergroup-members';
+      supergroup.groups.forEach(g => members.appendChild(buildGroupBlock(g, true)));
+      const addTile = doc.createElement('div');
+      addTile.className = 'add-to-group';
+      addTile.textContent = tr('addSubGroup');
+      addTile.addEventListener('click', () => {
+        store.addGroupToSuperGroup(supergroup.id, tr('newGroupLabel'));
+        render();
+      });
+      members.appendChild(addTile);
+      wrap.appendChild(members);
+    }
+
+    return wrap;
+  }
+
   /* ---------------- render ---------------- */
 
   function render() {
     colLeft.innerHTML = '';
     colRight.innerHTML = '';
     const [left, right] = splitColumns(store.items);
-    const build = it => (it.kind === 'timer' ? buildTimerRow(it, null, false) : buildGroupBlock(it));
+    const build = it => {
+      if (it.kind === 'timer') return buildTimerRow(it, null, false);
+      if (it.kind === 'supergroup') return buildSuperGroupBlock(it);
+      return buildGroupBlock(it, false);
+    };
     left.forEach(it => colLeft.appendChild(build(it)));
     right.forEach(it => colRight.appendChild(build(it)));
     updateToggleAllButton();
@@ -379,7 +486,13 @@ export function createUI(config) {
   }
 
   function refreshBadges() {
-    store.items.forEach(it => { if (it.kind === 'group') updateGroupBadge(it); });
+    for (const it of store.items) {
+      if (it.kind === 'group') updateGroupBadge(it);
+      else if (it.kind === 'supergroup') {
+        it.groups.forEach(updateGroupBadge);
+        updateSuperGroupBadge(it);
+      }
+    }
     updateToggleAllButton();
   }
 
@@ -388,8 +501,17 @@ export function createUI(config) {
   function handleEvents(events) {
     for (const ev of events) {
       if (ev.type !== 'expired') continue;
-      // 靜音／被合併吃掉的那一聲：畫面照閃，但不出聲
-      const text = announcementFor(ev, { announceGroup, suffix: STR[lang].timeUpSuffix });
+      const group = ev.group;
+      const supergroup = group ? store.superGroupOf(group) : null;
+      // 靜音／被連線或配對合併吃掉的那一聲：畫面照閃，但不出聲。
+      // 連線只有在雙方時間對上時才會走到 ev.mergedText；沒對上就照真正的名字唸，不套用連線文字。
+      const text = announcementFor(ev, {
+        mode: announceMode,
+        suffix: STR[lang].timeUpSuffix,
+        motherLabel: supergroup ? supergroup.label : null,
+        groupLabel: group ? group.label : null,
+        timerLabel: ev.timer.label,
+      });
       if (text !== null) {
         beep();
         speaker.speak(text);
@@ -419,10 +541,12 @@ export function createUI(config) {
   function onKeyDown(e) {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (isTypingTarget(e.target)) return;
-    const group = store.triggerHotkey(e.key);
-    if (!group) return;
+    const target = store.triggerHotkey(e.key);
+    if (!target) return;
     if (e.preventDefault) e.preventDefault();
-    updateMuteVisual(group);
+    // 綁到母群組：循環切換的是底下每個子群組的靜音旗標，逐一刷新它們的 🔊/🔇
+    if (target.kind === 'supergroup') target.groups.forEach(updateMuteVisual);
+    else updateMuteVisual(target);
   }
 
   /* ---------------- 工具列 ---------------- */
@@ -434,7 +558,7 @@ export function createUI(config) {
       render();
     });
 
-    // 全部重設：計時器歸位、本輪靜音一次清空，只設定不自動開始倒數
+    // 全部重設：計時器歸位、本輪靜音一次清空（母群組的循環也一起打回第一個子群組），只設定不自動開始倒數
     el('resetAllBtn').addEventListener('click', () => {
       ensureAudio();
       store.resetAll();
@@ -444,12 +568,15 @@ export function createUI(config) {
 
     el('addTimerBtn').addEventListener('click', () => { store.addTimer(tr('newTimerLabel')); render(); });
     el('addGroupBtn').addEventListener('click', () => { store.addGroup(tr('newGroupLabel')); render(); });
+    if (addSuperGroupBtn) {
+      addSuperGroupBtn.addEventListener('click', () => { store.addSuperGroup(tr('newSuperGroupLabel')); render(); });
+    }
 
     voiceToggle.addEventListener('change', () => { if (!voiceToggle.checked) speaker.stop(); save(); });
 
     announceBtn.addEventListener('click', () => {
-      announceGroup = !announceGroup;
-      announceBtn.textContent = announceGroup ? tr('announceGroupLabel') : tr('announceLabelOnly');
+      announceMode = nextAnnounceMode(announceMode);
+      announceBtn.textContent = tr(ANNOUNCE_MODE_KEY[announceMode]);
       save();
     });
 
@@ -482,7 +609,7 @@ export function createUI(config) {
     applyStaticTranslations,
     settings,
     getLang: () => lang,
-    isAnnounceGroup: () => announceGroup,
+    getAnnounceMode: () => announceMode,
     isVoiceOn: () => voiceToggle.checked,
   };
 }

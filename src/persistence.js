@@ -27,29 +27,36 @@ export function decodeState(encoded) {
   }
 }
 
+/** 播報模式舊資料換算：舊版只有 announceGroup 布林，true＝子群組+標籤，false＝只唸標籤 */
+function legacyAnnounceMode(raw) {
+  if (typeof raw.announceMode === 'string') return raw.announceMode;
+  return raw.announceGroup === true ? 'group' : 'label';
+}
+
 /** 把讀回來的資料補齊成固定形狀，缺的用預設值 */
 export function normalizeState(raw, defaults = {}) {
   const base = {
     voice: true,
-    announceGroup: false,
+    announceMode: 'label',
     lang: 'zh-Hant',
     items: [],
     sessionSec: 600,
     timelines: [],
-    pairs: [],
+    links: [],
     ...defaults,
   };
   if (!raw || typeof raw !== 'object') return { ...base, empty: true };
   const sessionSec = Number(raw.sessionSec);
   return {
     voice: raw.voice !== false,
-    announceGroup: raw.announceGroup === true,
+    // 向下兼容舊版的 announceGroup 布林；新資料一律看 announceMode
+    announceMode: legacyAnnounceMode(raw),
     lang: typeof raw.lang === 'string' ? raw.lang : base.lang,
     items: Array.isArray(raw.items) ? raw.items : [],
-    // 時間軸與配對是使用者自己建的資料，跟計時器一樣要還原
+    // 時間軸、連線是使用者自己建的資料，跟計時器一樣要還原
     sessionSec: Number.isFinite(sessionSec) && sessionSec > 0 ? sessionSec : base.sessionSec,
     timelines: Array.isArray(raw.timelines) ? raw.timelines : [],
-    pairs: Array.isArray(raw.pairs) ? raw.pairs : [],
+    links: Array.isArray(raw.links) ? raw.links : [],
     empty: !Array.isArray(raw.items) || raw.items.length === 0,
   };
 }

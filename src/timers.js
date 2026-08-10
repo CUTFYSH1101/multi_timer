@@ -5,19 +5,21 @@
  *      這樣才能在 Node 裡純邏輯測試到期行為。
  *   2. 循環重啟不用 setTimeout，改成記在 restartAt 上由 tick 判斷，
  *      測試才能用假時鐘瞬間快轉。
- *   3. 最高原則：系統不准懂遊戲。時間軸、配對合併文字、快捷鍵全都是使用者輸入的資料，
+ *   3. 最高原則：系統不准懂遊戲。時間軸、合併語音通知的文字、快捷鍵全都是使用者輸入的資料，
  *      這一層只負責「照這串數字算下一個」跟「照這串字唸」，不解讀任何語意。
+ *   4. 母群組（supergroup）是選配的第三層，只有新建的母群組才有：母群組 → 子群組（group）→ 單元（timer）。
+ *      沒有母群組的舊資料完全是「群組 → 單元」兩層，行為一個位元都不變。
  */
 
 export const COLORS = ['#5EEAD4', '#F0B429', '#C084FC', '#FB7185', '#60A5FA', '#34D399'];
 export const LOOP_RESTART_MS = 900;
 export const DEFAULT_SEC = 300;
 
-/** 配對合併的預設容許誤差（秒） */
+/** 合併語音通知的預設容許誤差（秒） */
 export const DEFAULT_TOLERANCE_SEC = 3;
 /** 本場長度預設值；時間軸的時間點是掛在這個倒數上的刻度 */
 export const DEFAULT_SESSION_SEC = 600;
-/** 預設分配給前幾個群組的快捷鍵。鍵盤按鍵有限，計時器沒有，所以只綁群組。 */
+/** 預設分配給前幾個群組/母群組的快捷鍵。鍵盤按鍵有限，計時器沒有，所以只綁群組層級。 */
 export const DEFAULT_HOTKEYS = ['1', '2', '3', '4', '5', '6', '7', '8'];
 
 const EPS = 1e-6;
@@ -37,8 +39,8 @@ export class TimerStore {
     this.items = [];
     /** 使用者自建的時間軸模板 */
     this.timelines = [];
-    /** 使用者手動綁的配對（絕不由系統自己猜） */
-    this.pairs = [];
+    /** 使用者手動綁的合併語音通知：同層級（子群組/計時器）兩個東西，時間對上時合併成一次語音 */
+    this.links = [];
     /** 本場長度：時間軸模板套用時，拿它當「本場長度－時間點」的換算基準 */
     this.session = { lengthSec: DEFAULT_SESSION_SEC };
     this._id = 0;
@@ -81,8 +83,27 @@ export class TimerStore {
       mutedThisRound: false,
       /** 掛哪一張時間軸模板；null = 不掛，行為跟以前完全一樣 */
       timelineId: null,
-      /** 快捷鍵控制的是這個群組的本輪靜音 */
+      /** 快捷鍵控制的是這個群組的本輪靜音。巢狀在母群組底下的子群組永遠是 null，
+       *  快捷鍵改綁在母群組上，子群組本身不再單獨可指派。 */
       hotkey: null,
+      /** 屬於哪個母群組；頂層（舊）群組永遠是 null，行為完全不受母群組機制影響 */
+      parentSuperGroupId: null,
+    };
+  }
+
+  /** 母群組：新的第三層，只有明確新建才會出現。 */
+  createSuperGroup(label) {
+    return {
+      id: this._nextId('sg'),
+      kind: 'supergroup',
+      label: String(label),
+      collapsed: false,
+      color: this._nextColor(),
+      groups: [],
+      /** 快捷鍵按下去＝循環切換下一個子群組有聲音 */
+      hotkey: null,
+      /** 目前「有聲音」的子群組在 groups 裡的位置 */
+      activeGroupIndex: 0,
     };
   }
 
@@ -98,6 +119,12 @@ export class TimerStore {
     return group;
   }
 
+  addSuperGroup(label) {
+    const supergroup = this.createSuperGroup(label);
+    this.items.push(supergroup);
+    return supergroup;
+  }
+
   addTimerToGroup(groupId, label, totalSec = DEFAULT_SEC) {
     const group = this.findGroup(groupId);
     if (!group) return null;
@@ -106,24 +133,59 @@ export class TimerStore {
     return timer;
   }
 
+  /** 在母群組底下新增一個子群組。第一個子群組自動「有聲音」；之後加入的不打斷目前循環位置。 */
+  addGroupToSuperGroup(superId, label) {
+    const supergroup = this.findSuperGroup(superId);
+    if (!supergroup) return null;
+    const group = this.createGroup(label);
+    group.parentSuperGroupId = supergroup.id;
+    supergroup.groups.push(group);
+    this._applyActiveGroup(supergroup);
+    return group;
+  }
+
   /* ---------- 查詢 ---------- */
 
-  /** 攤平成一維計時器陣列（含群組內的） */
+  /** 攤平成一維計時器陣列（含群組內、母群組→子群組內的） */
   flatten() {
     const all = [];
     for (const it of this.items) {
       if (it.kind === 'timer') all.push(it);
-      else all.push(...it.timers);
+      else if (it.kind === 'group') all.push(...it.timers);
+      else if (it.kind === 'supergroup') { for (const g of it.groups) all.push(...g.timers); }
     }
     return all;
   }
 
+  /** 只回傳頂層（舊）群組，不含巢狀在母群組底下的子群組 */
   groups() {
     return this.items.filter(it => it.kind === 'group');
   }
 
+  superGroups() {
+    return this.items.filter(it => it.kind === 'supergroup');
+  }
+
+  /** 頂層群組 + 所有母群組底下的子群組，連線/選單要看全部群組層級時用這個 */
+  allGroups() {
+    const all = [...this.groups()];
+    for (const sg of this.superGroups()) all.push(...sg.groups);
+    return all;
+  }
+
+  /** 找群組：頂層群組，或任何母群組底下的子群組 */
   findGroup(gid) {
-    return this.items.find(it => it.kind === 'group' && it.id === gid) || null;
+    const top = this.items.find(it => it.kind === 'group' && it.id === gid);
+    if (top) return top;
+    for (const sg of this.superGroups()) {
+      const g = sg.groups.find(g => g.id === gid);
+      if (g) return g;
+    }
+    return null;
+  }
+
+  findSuperGroup(sgid) {
+    return this.items.find(it => it.kind === 'supergroup' && it.id === sgid) || null;
   }
 
   findTimer(tid) {
@@ -135,6 +197,15 @@ export class TimerStore {
     return timer.parentGroupId ? this.findGroup(timer.parentGroupId) : null;
   }
 
+  /** 這個群組所屬的母群組，舊群組（不在母群組底下）回傳 null */
+  superGroupOf(group) {
+    return group && group.parentSuperGroupId ? this.findSuperGroup(group.parentSuperGroupId) : null;
+  }
+
+  superGroupOfTimer(timer) {
+    return this.superGroupOf(this.groupOf(timer));
+  }
+
   /* ---------- 刪除 ---------- */
 
   removeTimer(tid) {
@@ -142,17 +213,41 @@ export class TimerStore {
     this.items = this.items.filter(it => !(it.kind === 'timer' && it.id === tid));
     for (const it of this.items) {
       if (it.kind === 'group') it.timers = it.timers.filter(t => t.id !== tid);
+      else if (it.kind === 'supergroup') {
+        for (const g of it.groups) g.timers = g.timers.filter(t => t.id !== tid);
+      }
     }
     const removed = this.flatten().length < before;
-    if (removed) this._prunePairs();
+    if (removed) this._pruneLinks();
     return removed;
   }
 
   removeGroup(gid) {
+    const beforeTop = this.items.length;
+    this.items = this.items.filter(it => !(it.kind === 'group' && it.id === gid));
+    let removed = this.items.length < beforeTop;
+
+    if (!removed) {
+      for (const sg of this.superGroups()) {
+        const before = sg.groups.length;
+        sg.groups = sg.groups.filter(g => g.id !== gid);
+        if (sg.groups.length < before) {
+          removed = true;
+          if (sg.activeGroupIndex >= sg.groups.length) sg.activeGroupIndex = Math.max(0, sg.groups.length - 1);
+          this._applyActiveGroup(sg);
+        }
+      }
+    }
+
+    if (removed) this._pruneLinks();
+    return removed;
+  }
+
+  removeSuperGroup(sgid) {
     const before = this.items.length;
-    this.items = this.items.filter(it => it.id !== gid);
+    this.items = this.items.filter(it => !(it.kind === 'supergroup' && it.id === sgid));
     const removed = this.items.length < before;
-    if (removed) this._prunePairs();
+    if (removed) this._pruneLinks();
     return removed;
   }
 
@@ -222,15 +317,43 @@ export class TimerStore {
     return !!timer.mutedThisRound;
   }
 
-  /** 靜音旗標不會自己消失，只有開場重置會一次清空 */
+  /** 靜音旗標不會自己消失，只有開場重置會一次清空；母群組的循環也會一起打回第一個子群組 */
   clearMutes() {
     for (const it of this.items) {
-      it.mutedThisRound = false;
-      if (it.kind === 'group') it.timers.forEach(t => { t.mutedThisRound = false; });
+      if (it.kind === 'group') {
+        it.mutedThisRound = false;
+        it.timers.forEach(t => { t.mutedThisRound = false; });
+      } else if (it.kind === 'timer') {
+        it.mutedThisRound = false;
+      } else if (it.kind === 'supergroup') {
+        for (const g of it.groups) g.timers.forEach(t => { t.mutedThisRound = false; });
+      }
     }
+    for (const sg of this.superGroups()) this.resetSuperGroupCycle(sg);
   }
 
-  /* ---------- 快捷鍵（綁群組，不綁計時器） ---------- */
+  /* ---------- 母群組：快捷鍵循環子群組 ---------- */
+
+  /** 依 activeGroupIndex 把子群組的本輪靜音全部套好：只有指到的那個有聲音 */
+  _applyActiveGroup(supergroup) {
+    supergroup.groups.forEach((g, i) => { g.mutedThisRound = i !== supergroup.activeGroupIndex; });
+  }
+
+  /** 快捷鍵按一次＝下一個子群組有聲音，其餘子群組靜音，最後一個再按會繞回第一個 */
+  cycleActiveGroup(supergroup) {
+    if (supergroup.groups.length === 0) return supergroup;
+    supergroup.activeGroupIndex = (supergroup.activeGroupIndex + 1) % supergroup.groups.length;
+    this._applyActiveGroup(supergroup);
+    return supergroup;
+  }
+
+  /** 把循環位置打回第一個子群組（開場重置、母群組自己重設都會呼叫這個） */
+  resetSuperGroupCycle(supergroup) {
+    supergroup.activeGroupIndex = 0;
+    this._applyActiveGroup(supergroup);
+  }
+
+  /* ---------- 快捷鍵（綁在頂層群組或母群組上，不綁計時器、不綁子群組） ---------- */
 
   normalizeHotkey(key) {
     if (key === null || key === undefined) return null;
@@ -239,15 +362,20 @@ export class TimerStore {
     return k.length === 1 ? k.toLowerCase() : k;
   }
 
-  /** 同一顆鍵只能綁一個群組，設過去會把別人身上的解掉 */
-  setHotkey(group, key) {
+  /** 目前所有「可以擁有快捷鍵」的對象：頂層群組 + 母群組（巢狀子群組不算） */
+  hotkeyOwners() {
+    return this.items.filter(it => it.kind === 'group' || it.kind === 'supergroup');
+  }
+
+  /** 同一顆鍵只能綁一個對象，設過去會把別人身上的解掉 */
+  setHotkey(target, key) {
     const k = this.normalizeHotkey(key);
     if (k) {
-      for (const g of this.groups()) {
-        if (g !== group && g.hotkey === k) g.hotkey = null;
+      for (const owner of this.hotkeyOwners()) {
+        if (owner !== target && owner.hotkey === k) owner.hotkey = null;
       }
     }
-    group.hotkey = k;
+    target.hotkey = k;
     return k;
   }
 
@@ -257,25 +385,38 @@ export class TimerStore {
     return this.groups().find(g => g.hotkey === k) || null;
   }
 
-  /** 按下快捷鍵 = 切換那個群組的本輪靜音。沒綁到就什麼都不做。 */
-  triggerHotkey(key) {
-    const group = this.groupByHotkey(key);
-    if (!group) return null;
-    this.toggleMute(group);
-    return group;
+  superGroupByHotkey(key) {
+    const k = this.normalizeHotkey(key);
+    if (!k) return null;
+    return this.superGroups().find(sg => sg.hotkey === k) || null;
   }
 
-  /** 依建立順序把預設鍵發給還沒有快捷鍵的群組；已經設過的不動 */
+  /**
+   * 按下快捷鍵：
+   *   - 綁到頂層群組 → 切換那個群組的本輪靜音（跟以前一樣）
+   *   - 綁到母群組   → 循環切換下一個子群組有聲音
+   *   - 沒綁到       → 什麼都不做
+   */
+  triggerHotkey(key) {
+    const group = this.groupByHotkey(key);
+    if (group) { this.toggleMute(group); return group; }
+    const supergroup = this.superGroupByHotkey(key);
+    if (supergroup) { this.cycleActiveGroup(supergroup); return supergroup; }
+    return null;
+  }
+
+  /** 依 items 建立順序，把預設鍵發給還沒有快捷鍵的頂層群組/母群組；已經設過的不動 */
   assignDefaultHotkeys(keys = DEFAULT_HOTKEYS) {
-    const used = new Set(this.groups().map(g => g.hotkey).filter(Boolean));
+    const owners = this.hotkeyOwners();
+    const used = new Set(owners.map(o => o.hotkey).filter(Boolean));
     const free = keys.map(k => this.normalizeHotkey(k)).filter(k => k && !used.has(k));
-    for (const g of this.groups()) {
-      if (g.hotkey) continue;
+    for (const owner of owners) {
+      if (owner.hotkey) continue;
       const k = free.shift();
       if (!k) break;
-      g.hotkey = k;
+      owner.hotkey = k;
     }
-    return this.groups().filter(g => g.hotkey);
+    return owners.filter(o => o.hotkey);
   }
 
   /* ---------- 時間軸模板 ---------- */
@@ -298,7 +439,7 @@ export class TimerStore {
   removeTimeline(id) {
     const before = this.timelines.length;
     this.timelines = this.timelines.filter(x => x.id !== id);
-    for (const g of this.groups()) if (g.timelineId === id) g.timelineId = null;
+    for (const g of this.allGroups()) if (g.timelineId === id) g.timelineId = null;
     return this.timelines.length < before;
   }
 
@@ -378,7 +519,7 @@ export class TimerStore {
       if (group.timers.length > n) {
         deleted = group.timers.length - n;
         group.timers.splice(n);
-        this._prunePairs();
+        this._pruneLinks();
       }
     }
 
@@ -395,6 +536,12 @@ export class TimerStore {
   /** 群組重設：單純把群組內每個計時器設回自己的長度，不會自動開始倒數。 */
   resetGroup(group) {
     this.batchReset(group.timers);
+  }
+
+  /** 母群組重設：底下所有子群組的計時器一起歸位，循環位置也打回第一個子群組。 */
+  resetSuperGroup(supergroup) {
+    for (const g of supergroup.groups) this.batchReset(g.timers);
+    this.resetSuperGroupCycle(supergroup);
   }
 
   /**
@@ -423,52 +570,111 @@ export class TimerStore {
     });
   }
 
-  /* ---------- 配對合併播報 ---------- */
+  /* ---------- 合併語音通知 ---------- */
 
   /**
-   * 手動綁定一組計時器，到期時間相近就合成一句話唸。
-   * @param {string[]} timerIds
-   * @param {string} text 合併後要唸的字，由使用者自己打（程式不負責把標籤兜起來）
+   * 找某個層級目前有效的實體清單（給連線驗證/選單排除用）。
+   * 只支援子群組跟單元兩層——母群組本身沒有自己的靜音狀態（有聲音的是它底下的子群組），
+   * 連在母群組上會沒辦法判斷「兩邊是否都沒被靜音」，所以連線不開放母群組層級。
+   * @param {'group'|'timer'} level
+   */
+  _entitiesOfLevel(level) {
+    if (level === 'group') return this.allGroups();
+    if (level === 'timer') return this.flatten();
+    return [];
+  }
+
+  /**
+   * 手動連線同一層級的兩個群組/計時器——一條連線永遠剛好兩個成員，程式只做兩兩配對，
+   * 給超過兩個或少於兩個都直接擋下。子連子、單元連單元——不同層級不能連在一起。
+   * 只有連線兩邊目前都沒被靜音時，才會去檢查底下的計時器是不是在容許誤差內幾乎同時到期；
+   * 只要有一邊被靜音，這筆連線這一輪就當作不存在——不搜尋、不強制歸零、各自正常倒數。
+   * @param {'group'|'timer'} level
+   * @param {string[]} ids 必須剛好兩個
+   * @param {string} text 合併時要唸的字，由使用者自己打
    * @param {number} toleranceSec 容許誤差
    */
-  addPair(timerIds, text, toleranceSec = DEFAULT_TOLERANCE_SEC) {
-    const ids = [...new Set((Array.isArray(timerIds) ? timerIds : []).filter(id => this.findTimer(id)))];
-    if (ids.length < 2) return null;
-    // 一個計時器只能屬於一組配對，重綁時先從舊的拿掉
-    for (const p of this.pairs) p.timerIds = p.timerIds.filter(id => !ids.includes(id));
-    this.pairs = this.pairs.filter(p => p.timerIds.length >= 2);
+  addLink(level, ids, text, toleranceSec = DEFAULT_TOLERANCE_SEC) {
+    if (level !== 'group' && level !== 'timer') return null;
+    const alive = new Set(this._entitiesOfLevel(level).map(e => e.id));
+    const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).filter(id => alive.has(id)))];
+    if (uniqueIds.length !== 2) return null;
+
+    // 同一層級裡一個東西只能屬於一組連線，重綁時先從舊的拿掉
+    for (const link of this.links) {
+      if (link.level === level) link.memberIds = link.memberIds.filter(id => !uniqueIds.includes(id));
+    }
+    this.links = this.links.filter(l => l.memberIds.length === 2);
 
     const tol = Number(toleranceSec);
-    const pair = {
-      id: this._nextId('p'),
-      timerIds: ids,
+    const link = {
+      id: this._nextId('lk'),
+      level,
+      memberIds: uniqueIds,
       text: String(text ?? ''),
       toleranceSec: Number.isFinite(tol) && tol >= 0 ? tol : DEFAULT_TOLERANCE_SEC,
     };
-    this.pairs.push(pair);
-    return pair;
+    this.links.push(link);
+    return link;
   }
 
-  removePair(pid) {
-    const before = this.pairs.length;
-    this.pairs = this.pairs.filter(p => p.id !== pid);
-    return this.pairs.length < before;
+  removeLink(lid) {
+    const before = this.links.length;
+    this.links = this.links.filter(l => l.id !== lid);
+    return this.links.length < before;
   }
 
-  pairOf(timer) {
-    return this.pairs.find(p => p.timerIds.includes(timer.id)) || null;
+  /** 這個東西在這個層級上是否連線；回傳連線物件或 null */
+  linkOf(entity, level) {
+    if (!entity) return null;
+    return this.links.find(l => l.level === level && l.memberIds.includes(entity.id)) || null;
   }
 
-  pairMembers(pair) {
-    return pair.timerIds.map(id => this.findTimer(id)).filter(Boolean);
+  /** 這個層級目前已經被連走的 id 集合，UI 選單用來排除已連線的選項 */
+  linkedIds(level) {
+    const ids = new Set();
+    for (const l of this.links) if (l.level === level) for (const id of l.memberIds) ids.add(id);
+    return ids;
   }
 
-  /** 計時器被刪掉之後，剩不到兩個成員的配對就不成立了 */
-  _prunePairs() {
-    const alive = new Set(this.flatten().map(t => t.id));
-    this.pairs = this.pairs
-      .map(p => ({ ...p, timerIds: p.timerIds.filter(id => alive.has(id)) }))
-      .filter(p => p.timerIds.length >= 2);
+  linkMembers(link) {
+    return link.memberIds.map(id => this._entitiesOfLevel(link.level).find(e => e.id === id)).filter(Boolean);
+  }
+
+  /** 這個連線成員底下實際會倒數的計時器：標籤本身，或群組內全部 */
+  _timersOfLinkMember(level, id) {
+    if (level === 'timer') {
+      const t = this.findTimer(id);
+      return t ? [t] : [];
+    }
+    if (level === 'group') {
+      const g = this.allGroups().find(x => x.id === id);
+      return g ? g.timers : [];
+    }
+    return [];
+  }
+
+  /** 這個計時器往上找，屬於哪一筆連線（先看標籤本身，再看它的群組） */
+  _linkMemberOf(timer) {
+    let link = this.links.find(l => l.level === 'timer' && l.memberIds.includes(timer.id));
+    if (link) return { level: 'timer', id: timer.id, link };
+
+    const group = this.groupOf(timer);
+    if (group) {
+      link = this.links.find(l => l.level === 'group' && l.memberIds.includes(group.id));
+      if (link) return { level: 'group', id: group.id, link };
+    }
+    return null;
+  }
+
+  /** 群組/計時器被刪掉之後，剩不到兩個成員的連線就不成立了 */
+  _pruneLinks() {
+    this.links = this.links
+      .map(l => {
+        const alive = new Set(this._entitiesOfLevel(l.level).map(e => e.id));
+        return { ...l, memberIds: l.memberIds.filter(id => alive.has(id)) };
+      })
+      .filter(l => l.memberIds.length === 2);
   }
 
   /* ---------- 時間推進 ---------- */
@@ -488,9 +694,9 @@ export class TimerStore {
       forced,
       /** 本輪靜音 → 到期那一刻不出聲（但事件照發，畫面還是要閃） */
       silent: this.isSilenced(timer),
-      /** 這一聲被別人的合併播報吃掉了，不要重複唸 */
+      /** 這一聲被別人的合併語音吃掉了，不要重複唸 */
       suppressed: false,
-      /** 合併播報的字（只掛在代表事件上） */
+      /** 合併語音要唸的字（只掛在代表事件上），已經是最終要唸的整句話 */
       mergedText: null,
       /** 一起被合併進來的其他計時器 */
       mergedWith: [],
@@ -528,36 +734,52 @@ export class TimerStore {
         events.push(this._expiredEvent(timer));
       }
     }
-    this._applyPairing(events, now);
+    this._applyLinking(events, now);
     return events;
   }
 
   /**
-   * 配對合併：快的先到 0，回頭看配對對象還剩幾秒。
-   *   - 超出容許誤差 → 各唸各的
-   *   - 在容許誤差內 → 慢的直接強制歸零，兩個一起只唸一次合併文字
-   * 寧可提前一兩秒，也不要為了等慢的而延後提醒。
+   * 合併語音通知：這個到期的計時器如果屬於某筆連線，就去看連線的另一邊（一定剛好只有一個成員）
+   * 底下有沒有計時器也快到期：
+   *   - 誤差內／同一格一起到期 → 合併成一次語音：連線文字 + 兩邊各自的標籤（標籤相同就只唸一次）
+   *   - 沒對上時間 → 什麼都不做，各自照原本的名字唸
+   * 快的先到 0，回頭看另一邊還剩幾秒；寧可提前一兩秒，也不要為了等慢的而延後提醒。
+   *
+   * 靜音是「這筆連線這一輪根本不存在」，不是「合併了但不出聲」：
+   *   - 這個計時器自己被靜音（本輪靜音，或所屬群組本輪靜音）就直接跳過，
+   *     連搜尋都不做——不會去動連線另一邊的計時器，更不會把它強制歸零。
+   *   - 連線另一邊的候選計時器如果被靜音，一開始就不列入候選，
+   *     不管時間對不對上都不會被強制歸零，繼續照自己的步調倒數。
    */
-  _applyPairing(events, now) {
-    if (this.pairs.length === 0) return;
+  _applyLinking(events, now) {
+    if (this.links.length === 0) return;
 
     const byTimer = new Map();
     for (const ev of events) if (ev.type === 'expired') byTimer.set(ev.timer.id, ev);
     if (byTimer.size === 0) return;
 
     const handled = new Set();
-    // 只走這一格「自然到期」的事件，強制歸零補進來的不再當代表
     const leaders = [...byTimer.values()];
 
     for (const ev of leaders) {
       if (handled.has(ev.timer.id)) continue;
       handled.add(ev.timer.id);
 
-      const pair = this.pairOf(ev.timer);
-      if (!pair) continue;
+      // 自己被靜音：這筆連線這一輪不存在，不搜尋、不動另一邊
+      if (this.isSilenced(ev.timer)) continue;
+
+      const member = this._linkMemberOf(ev.timer);
+      if (!member) continue;
+      const { link } = member;
+
+      const otherId = link.memberIds.find(id => id !== member.id);
+      // 另一邊也被靜音的候選一律不列入候選，不管時間對不對上都不會被強制歸零
+      const partnerTimers = otherId
+        ? this._timersOfLinkMember(link.level, otherId).filter(t => !this.isSilenced(t))
+        : [];
 
       const partners = [];
-      for (const other of this.pairMembers(pair)) {
+      for (const other of partnerTimers) {
         if (other.id === ev.timer.id || handled.has(other.id)) continue;
 
         if (byTimer.has(other.id)) {
@@ -566,7 +788,7 @@ export class TimerStore {
           handled.add(other.id);
           continue;
         }
-        if (other.running && other.remainingSec > 0 && other.remainingSec <= pair.toleranceSec + EPS) {
+        if (other.running && other.remainingSec > 0 && other.remainingSec <= link.toleranceSec + EPS) {
           this._expire(other, now);
           const forcedEv = this._expiredEvent(other, true);
           events.push(forcedEv);
@@ -574,70 +796,111 @@ export class TimerStore {
           partners.push(other);
           handled.add(other.id);
         }
-        // 超出誤差：什麼都不做，它晚點自己到期再唸自己的
+        // 超出誤差：什麼都不做，它晚點自己到期再唸自己本來的名字
       }
 
       if (partners.length === 0) continue;
 
-      // 被靜音的不參與合併——不然「上路」這輪不去卻聽到合併文字，等於靜音沒效果
-      const speaking = [ev.timer, ...partners].filter(t => !this.isSilenced(t));
-      if (speaking.length < 2) continue;
-
+      const speaking = [ev.timer, ...partners];
       const leaderEv = byTimer.get(speaking[0].id);
-      leaderEv.mergedText = pair.text;
+      leaderEv.mergedText = this._mergedLinkText(link, speaking);
       leaderEv.mergedWith = speaking.slice(1);
       for (const t of speaking.slice(1)) byTimer.get(t.id).suppressed = true;
     }
   }
 
+  /**
+   * 連線合併時實際要唸的字：
+   *   - 單元層級連線：直接唸使用者填的字，不加任何標籤
+   *     （這一層本來就是最細的，底下沒有更細的東西可以附加）。
+   *   - 子群組層級連線：使用者填的字 + 這次合併到的每個計時器自己的標籤，
+   *     標籤字串相同的只算一次（先出現的算數），順序依合併順序。
+   */
+  _mergedLinkText(link, speaking) {
+    if (link.level === 'timer') return link.text;
+    const labels = [];
+    for (const t of speaking) if (!labels.includes(t.label)) labels.push(t.label);
+    return [link.text, ...labels].join(' ');
+  }
+
   /* ---------- 序列化 ---------- */
 
-  /** 這個計時器在 items 裡的位置。id 每次載入都會重編，所以配對用位置存。 */
-  pathOfTimer(timer) {
+  /**
+   * 任何東西（母群組/群組/計時器）在 items 裡的位置路徑。id 每次載入都會重編，所以連線用位置存。
+   * 深度：
+   *   [i]       頂層母群組 / 頂層群組 / 頂層計時器
+   *   [i, j]    群組內計時器　或　母群組內第 j 個子群組
+   *   [i, j, k] 母群組內第 j 個子群組裡的第 k 個計時器
+   */
+  pathOfId(id) {
     for (let i = 0; i < this.items.length; i++) {
       const it = this.items[i];
-      if (it.kind === 'timer') {
-        if (it.id === timer.id) return [i];
-      } else {
-        const j = it.timers.findIndex(t => t.id === timer.id);
+      if (it.id === id) return [i];
+      if (it.kind === 'group') {
+        const j = it.timers.findIndex(t => t.id === id);
         if (j >= 0) return [i, j];
+      } else if (it.kind === 'supergroup') {
+        for (let j = 0; j < it.groups.length; j++) {
+          if (it.groups[j].id === id) return [i, j];
+          const k = it.groups[j].timers.findIndex(t => t.id === id);
+          if (k >= 0) return [i, j, k];
+        }
       }
     }
     return null;
   }
 
-  timerAtPath(path) {
+  entityAtPath(path) {
     if (!Array.isArray(path) || path.length === 0) return null;
     const it = this.items[path[0]];
     if (!it) return null;
-    if (path.length === 1) return it.kind === 'timer' ? it : null;
-    return it.kind === 'group' ? (it.timers[path[1]] || null) : null;
+    if (path.length === 1) return it;
+    if (it.kind === 'group') return it.timers[path[1]] || null;
+    if (it.kind === 'supergroup') {
+      const g = it.groups[path[1]];
+      if (!g) return null;
+      if (path.length === 2) return g;
+      return g.timers[path[2]] || null;
+    }
+    return null;
   }
 
   /** 只存「使用者設定」，不存當下的倒數/循環/收合/靜音狀態（刻意的） */
   toJSON() {
+    const serializeTimer = x => ({ label: x.label, totalSec: x.totalSec });
+    const serializeGroup = g => {
+      const out = { label: g.label, timers: g.timers.map(serializeTimer) };
+      const tlIdx = this.timelines.findIndex(x => x.id === g.timelineId);
+      if (tlIdx >= 0) out.tl = tlIdx;
+      return out;
+    };
     return this.items.map(it => {
       if (it.kind === 'timer') return { kind: 'timer', label: it.label, totalSec: it.totalSec };
-      const g = { kind: 'group', label: it.label, timers: it.timers.map(x => ({ label: x.label, totalSec: x.totalSec })) };
-      const tlIdx = this.timelines.findIndex(x => x.id === it.timelineId);
-      if (tlIdx >= 0) g.tl = tlIdx;
+      if (it.kind === 'supergroup') {
+        const sg = { kind: 'supergroup', label: it.label, groups: it.groups.map(serializeGroup) };
+        if (it.hotkey) sg.key = it.hotkey;
+        return sg;
+      }
+      const g = serializeGroup(it);
+      g.kind = 'group';
       if (it.hotkey) g.key = it.hotkey;
       return g;
     });
   }
 
-  /** 時間軸、配對、本場長度。跟 toJSON() 分開，免得動到既有的 items 格式。 */
+  /** 時間軸、連線、本場長度。跟 toJSON() 分開，免得動到既有的 items 格式。 */
   extrasJSON() {
     return {
       sessionSec: this.session.lengthSec,
       timelines: this.timelines.map(tl => ({ name: tl.name, points: tl.points })),
-      pairs: this.pairs
-        .map(p => ({
-          text: p.text,
-          tol: p.toleranceSec,
-          members: this.pairMembers(p).map(t => this.pathOfTimer(t)).filter(Boolean),
+      links: this.links
+        .map(l => ({
+          level: l.level,
+          text: l.text,
+          tol: l.toleranceSec,
+          members: l.memberIds.map(id => this.pathOfId(id)).filter(Boolean),
         }))
-        .filter(p => p.members.length >= 2),
+        .filter(l => l.members.length >= 2),
     };
   }
 
@@ -648,20 +911,34 @@ export class TimerStore {
    */
   loadJSON(data, fallback = { timerLabel: 'Timer', groupLabel: 'Group' }) {
     this.items = [];
-    this.pairs = [];
+    this.links = [];
     if (!Array.isArray(data)) return this;
+
+    const loadGroupTimers = (g, timers) => {
+      for (const tt of Array.isArray(timers) ? timers : []) {
+        if (!tt || typeof tt !== 'object') continue;
+        this.addTimerToGroup(g.id, tt.label || fallback.timerLabel, num(tt.totalSec));
+      }
+    };
+
     for (const it of data) {
       if (!it || typeof it !== 'object') continue;
-      if (it.kind === 'group') {
+      if (it.kind === 'supergroup') {
+        const sg = this.addSuperGroup(it.label || fallback.groupLabel);
+        if (it.key) this.setHotkey(sg, it.key);
+        for (const gg of Array.isArray(it.groups) ? it.groups : []) {
+          if (!gg || typeof gg !== 'object') continue;
+          const g = this.addGroupToSuperGroup(sg.id, gg.label || fallback.groupLabel);
+          const tl = this.timelines[Number(gg.tl)];
+          if (tl) g.timelineId = tl.id;
+          loadGroupTimers(g, gg.timers);
+        }
+      } else if (it.kind === 'group') {
         const g = this.addGroup(it.label || fallback.groupLabel);
         const tl = this.timelines[Number(it.tl)];
         if (tl) g.timelineId = tl.id;
         if (it.key) this.setHotkey(g, it.key);
-        const timers = Array.isArray(it.timers) ? it.timers : [];
-        for (const tt of timers) {
-          if (!tt || typeof tt !== 'object') continue;
-          this.addTimerToGroup(g.id, tt.label || fallback.timerLabel, num(tt.totalSec));
-        }
+        loadGroupTimers(g, it.timers);
       } else {
         this.addTimer(it.label || fallback.timerLabel, num(it.totalSec));
       }
@@ -670,8 +947,8 @@ export class TimerStore {
   }
 
   /**
-   * 完整還原（時間軸 → 計時器 → 配對，順序不能反：
-   * 群組要靠時間軸索引找回模板，配對要靠計時器位置找回成員）。
+   * 完整還原（時間軸 → 計時器 → 連線，順序不能反：
+   * 群組要靠時間軸索引找回模板，連線要靠位置找回成員）。
    */
   loadState(state, fallback = { timerLabel: 'Timer', groupLabel: 'Group' }) {
     const s = state && typeof state === 'object' ? state : {};
@@ -686,16 +963,17 @@ export class TimerStore {
     this.setSessionLength(s.sessionSec);
     this.loadJSON(s.items, fallback);
 
-    this.pairs = [];
-    const rawPairs = Array.isArray(s.pairs) ? s.pairs : [];
-    for (const p of rawPairs) {
-      if (!p || typeof p !== 'object') continue;
-      const members = (Array.isArray(p.members) ? p.members : [])
-        .map(path => this.timerAtPath(path))
+    this.links = [];
+    const rawLinks = Array.isArray(s.links) ? s.links : [];
+    for (const l of rawLinks) {
+      if (!l || typeof l !== 'object') continue;
+      const members = (Array.isArray(l.members) ? l.members : [])
+        .map(path => this.entityAtPath(path))
         .filter(Boolean);
       if (members.length < 2) continue;
-      this.addPair(members.map(t => t.id), p.text, p.tol);
+      this.addLink(l.level, members.map(e => e.id), l.text, l.tol);
     }
+
     return this;
   }
 }

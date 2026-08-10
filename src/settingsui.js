@@ -53,20 +53,49 @@ export function createSettingsPanel(config) {
     return b;
   }
 
-  /** 計時器在下拉選單裡的顯示名稱：群組名 / 標籤 */
+  /** 計時器在下拉選單裡的顯示名稱：（母群組 / ）群組名 / 標籤 */
   function timerOptionLabel(timer) {
     const g = store.groupOf(timer);
-    return (g ? g.label + ' / ' : '') + timer.label + '  (' + fmt(timer.totalSec) + ')';
+    const sg = g ? store.superGroupOf(g) : null;
+    const crumbs = [sg && sg.label, g && g.label].filter(Boolean);
+    return (crumbs.length ? crumbs.join(' / ') + ' / ' : '') + timer.label + '  (' + fmt(timer.totalSec) + ')';
   }
 
-  function timerSelect(selectedId) {
+  /** 群組在下拉選單裡的顯示名稱：（母群組 / ）群組名 */
+  function groupOptionLabel(group) {
+    const sg = store.superGroupOf(group);
+    return (sg ? sg.label + ' / ' : '') + group.label;
+  }
+
+  /* ---------------- 連線合併語音：層級共用小工具（只支援子群組/單元，不支援母群組） ---------------- */
+
+  const LINK_LEVELS = ['group', 'timer'];
+
+  function linkLevelLabelKey(level) {
+    if (level === 'group') return 'linkLevelGroup';
+    return 'linkLevelTimer';
+  }
+
+  function entityOptionLabel(level, entity) {
+    if (level === 'group') return groupOptionLabel(entity);
+    return timerOptionLabel(entity);
+  }
+
+  /** 這個層級目前還沒被連走的候選清單 */
+  function linkableEntities(level) {
+    const linked = store.linkedIds(level);
+    const all = level === 'group' ? store.allGroups() : store.flatten();
+    return all.filter(e => !linked.has(e.id));
+  }
+
+  function entitySelect(level, selectedId) {
     const sel = doc.createElement('select');
     sel.className = 'set-select';
-    for (const t of store.flatten()) {
+    for (const e of linkableEntities(level)) {
       const o = doc.createElement('option');
-      o.value = t.id;
-      o.textContent = timerOptionLabel(t);
-      if (t.id === selectedId) o.selected = true;
+      o.value = e.id;
+      o.textContent = entityOptionLabel(level, e);
+      if (e.id === selectedId) o.selected = true;
       sel.appendChild(o);
     }
     return sel;
@@ -125,60 +154,79 @@ export function createSettingsPanel(config) {
     return box;
   }
 
-  /* ---------------- 配對合併播報 ---------------- */
+  /* ---------------- 合併語音通知 ---------------- */
 
-  function buildPairs() {
-    const box = section('pairsTitle', 'pairsHint');
+  let linkLevel = 'group';
 
-    if (store.pairs.length === 0) box.appendChild(mk('p', 'set-empty', tr('noPairs')));
+  function buildLinks() {
+    const box = section('linksTitle', 'linksHint');
 
-    for (const pair of store.pairs) {
+    if (store.links.length === 0) box.appendChild(mk('p', 'set-empty', tr('noLinks')));
+
+    for (const link of store.links) {
       const row = mk('div', 'set-row');
 
       const members = mk('span', 'set-members',
-        store.pairMembers(pair).map(timerOptionLabel).join('  ＋  '));
+        '[' + tr(linkLevelLabelKey(link.level)) + '] ' +
+        store.linkMembers(link).map(e => entityOptionLabel(link.level, e)).join('  ＋  '));
 
-      const text = input('set-name', pair.text, tr('pairTextPh'));
-      text.addEventListener('input', () => { pair.text = text.value; });
+      const text = input('set-name', link.text, tr('linkTextPh'));
+      text.addEventListener('input', () => { link.text = text.value; });
       text.addEventListener('change', () => onChange(false));
 
-      const tol = input('set-tol', String(pair.toleranceSec), tr('pairTolPh'));
+      const tol = input('set-tol', String(link.toleranceSec), tr('linkTolPh'));
       tol.addEventListener('change', () => {
         const n = Number(tol.value);
-        pair.toleranceSec = Number.isFinite(n) && n >= 0 ? n : DEFAULT_TOLERANCE_SEC;
-        tol.value = String(pair.toleranceSec);
+        link.toleranceSec = Number.isFinite(n) && n >= 0 ? n : DEFAULT_TOLERANCE_SEC;
+        tol.value = String(link.toleranceSec);
         onChange(false);
       });
 
       row.appendChild(members);
       row.appendChild(text);
       row.appendChild(tol);
-      row.appendChild(delButton(() => { store.removePair(pair.id); onChange(false); render(); }));
+      row.appendChild(delButton(() => { store.removeLink(link.id); onChange(false); render(); }));
       box.appendChild(row);
     }
 
-    const all = store.flatten();
-    if (all.length >= 2) {
-      const addRow = mk('div', 'set-row set-addpair');
-      const selA = timerSelect(all[0].id);
-      const selB = timerSelect(all[1].id);
-      const text = input('set-name', '', tr('pairTextPh'));
-      const tol = input('set-tol', String(DEFAULT_TOLERANCE_SEC), tr('pairTolPh'));
+    const levelSel = doc.createElement('select');
+    levelSel.className = 'set-select';
+    for (const lvl of LINK_LEVELS) {
+      const o = doc.createElement('option');
+      o.value = lvl;
+      o.textContent = tr(linkLevelLabelKey(lvl));
+      if (lvl === linkLevel) o.selected = true;
+      levelSel.appendChild(o);
+    }
+    levelSel.addEventListener('change', () => { linkLevel = levelSel.value; render(); });
 
-      const add = mk('button', 'btn-ghost set-add', tr('addPair'));
+    const candidates = linkableEntities(linkLevel);
+    if (candidates.length >= 2) {
+      const addRow = mk('div', 'set-row set-addlink');
+      const selA = entitySelect(linkLevel, candidates[0].id);
+      const selB = entitySelect(linkLevel, candidates[1].id);
+      const text = input('set-name', '', tr('linkTextPh'));
+      const tol = input('set-tol', String(DEFAULT_TOLERANCE_SEC), tr('linkTolPh'));
+
+      const add = mk('button', 'btn-ghost set-add', tr('addLink'));
       add.addEventListener('click', () => {
-        if (selA.value === selB.value) { alertFn(tr('pairNeedTwo')); return; }
-        const pair = store.addPair([selA.value, selB.value], text.value, Number(tol.value));
-        if (!pair) { alertFn(tr('pairNeedTwo')); return; }
+        if (selA.value === selB.value) { alertFn(tr('linkNeedTwo')); return; }
+        const link = store.addLink(linkLevel, [selA.value, selB.value], text.value, Number(tol.value));
+        if (!link) { alertFn(tr('linkNeedTwo')); return; }
         onChange(false);
         render();
       });
 
+      addRow.appendChild(levelSel);
       addRow.appendChild(selA);
       addRow.appendChild(selB);
       addRow.appendChild(text);
       addRow.appendChild(tol);
       addRow.appendChild(add);
+      box.appendChild(addRow);
+    } else {
+      const addRow = mk('div', 'set-row set-addlink');
+      addRow.appendChild(levelSel);
       box.appendChild(addRow);
     }
 
@@ -189,24 +237,25 @@ export function createSettingsPanel(config) {
 
   function buildHotkeys() {
     const box = section('hotkeysTitle', 'hotkeysHint');
-    const groups = store.groups();
+    const owners = store.hotkeyOwners();
 
-    if (groups.length === 0) {
+    if (owners.length === 0) {
       box.appendChild(mk('p', 'set-empty', tr('noGroups')));
       return box;
     }
 
-    for (const g of groups) {
+    for (const owner of owners) {
       const row = mk('div', 'set-row');
-      const key = input('set-key', g.hotkey || '', tr('hotkeyPh'));
+      const key = input('set-key', owner.hotkey || '', tr('hotkeyPh'));
       key.maxLength = 1;
       key.addEventListener('change', () => {
-        store.setHotkey(g, key.value);
+        store.setHotkey(owner, key.value);
         onChange(true);
         render();
       });
+      const prefix = owner.kind === 'supergroup' ? '[' + tr('linkLevelSuperGroup') + '] ' : '';
       row.appendChild(key);
-      row.appendChild(mk('span', 'set-members', g.label));
+      row.appendChild(mk('span', 'set-members', prefix + owner.label));
       box.appendChild(row);
     }
 
@@ -225,7 +274,7 @@ export function createSettingsPanel(config) {
     if (!open) return;
     panel.appendChild(buildSession());
     panel.appendChild(buildTimelines());
-    panel.appendChild(buildPairs());
+    panel.appendChild(buildLinks());
     panel.appendChild(buildHotkeys());
   }
 

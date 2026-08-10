@@ -80,7 +80,7 @@ const ui = createUI({
   alertFn: msg => window.alert(msg),
   lang,
   voice: saved.voice,
-  announceGroup: saved.announceGroup,
+  announceMode: saved.announceMode,
 });
 
 ui.start();

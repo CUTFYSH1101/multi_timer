@@ -60,6 +60,8 @@
   .btn-primary.active{background:var(--accent2);}
   .btn-group{background:var(--accent3); color:#22093B;}
   .btn-group:hover{filter:brightness(1.08);}
+  .btn-supergroup{background:var(--accent6); color:#04231D;}
+  .btn-supergroup:hover{filter:brightness(1.08);}
   .btn-lang{background:var(--accent5); color:#071A33; min-width:44px; text-align:center; font-family:'Chakra Petch',monospace; letter-spacing:.03em;}
   .btn-lang:hover{filter:brightness(1.08);}
   .btn-ghost{background:var(--row); color:var(--text); border:1px solid var(--line);}
@@ -224,6 +226,20 @@
   }
   .add-to-group:hover{border-color:var(--accent3); color:var(--accent3);}
 
+  /* 母群組：header 沒有靜音鈕，少一欄；子群組巢狀在裡面時額外縮排一層，方便跟計時器的縮排區分 */
+  .supergroup-header{
+    border-left-color:var(--row-color, var(--accent6));
+    grid-template-columns: 18px 1fr 26px 44px 34px 34px 34px 22px;
+  }
+  .supergroup-members{
+    padding:6px 6px 6px 12px;
+    gap:6px;
+  }
+  .group-block.subgroup{
+    margin-left:6px;
+    border-color:var(--line);
+  }
+
   /* 設定面板：遊戲中最重要的是看計時器，所以這區預設收起來，不常駐畫面 */
   .settings-panel{
     display:none;
@@ -270,6 +286,7 @@
     .board{grid-template-columns: 1fr;}
     .row{grid-template-columns: 1fr 66px 32px 32px 32px 32px 20px;}
     .group-header{grid-template-columns: 18px 1fr 24px 40px 32px 32px 32px 32px 20px;}
+    .supergroup-header{grid-template-columns: 18px 1fr 24px 40px 32px 32px 32px 20px;}
   }
 </style>
 </head>
@@ -285,6 +302,7 @@
     <button class="btn-ghost" id="resetAllBtn">⟲ 全部重設</button>
     <button class="btn-ghost" id="addTimerBtn">+ 新增計時器</button>
     <button class="btn-group" id="addGroupBtn">+ 新增群組</button>
+    <button class="btn-supergroup" id="addSuperGroupBtn">+ 新增母群組</button>
     <button class="btn-lang" id="langBtn" title="切換語言 / 切换语言 / Switch language">繁</button>
     <div class="spacer"></div>
     <button class="btn-ghost" id="settingsBtn">⚙ 設定</button>
