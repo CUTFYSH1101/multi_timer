@@ -21,7 +21,7 @@ export function createUI(config) {
   const {
     doc,
     store,
-    cookieStore,
+    storage,
     speaker,
     beep = () => {},
     ensureAudio = () => {},
@@ -53,7 +53,7 @@ export function createUI(config) {
   /* ---------------- 儲存 ---------------- */
 
   function save() {
-    const result = cookieStore.save({
+    const result = storage.save({
       voice: voiceToggle.checked,
       announceMode,
       lang,

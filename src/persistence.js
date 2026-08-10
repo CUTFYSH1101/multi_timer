@@ -1,12 +1,16 @@
-/* Cookie 儲存 — cookie 的讀寫是注入的，所以邏輯可以在 Node 裡測 */
+/* localStorage 儲存 — 讀寫是注入的，所以邏輯可以在 Node 裡測 */
 
-export const COOKIE_NAME = 'multiTimerData';
+export const STORAGE_KEY = 'multiTimerData';
 
-/* 瀏覽器單一 cookie 上限約 4096 bytes（含 name= 與屬性）。
- * 留一點餘裕給 expires / path / SameSite。 */
-export const COOKIE_MAX_BYTES = 3800;
+/* localStorage 單一網站通常有 5MB 上限（以 UTF-16 code unit 算），
+ * 留很大的餘裕，正常使用幾乎不可能撞到。 */
+export const STORAGE_MAX_BYTES = 4_000_000;
 
-/** 從 document.cookie 這種字串裡挑出某個 cookie 的原始值 */
+/* 舊版用 cookie 存，cookie 名稱跟現在的 localStorage key 一樣叫 multiTimerData。
+ * 遷移時只需要從 cookie 字串裡挑出這個名字的值。 */
+export const COOKIE_NAME = STORAGE_KEY;
+
+/** 從 document.cookie 這種字串裡挑出某個 cookie 的原始值（搬家用） */
 export function readCookieValue(cookieString, name = COOKIE_NAME) {
   if (!cookieString) return null;
   const m = String(cookieString).match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
@@ -61,42 +65,33 @@ export function normalizeState(raw, defaults = {}) {
   };
 }
 
-/** 實際會被寫進 cookie 的位元組數（中文經過 encodeURIComponent 會膨脹到 9 bytes/字） */
-export function measureCookieBytes(encodedValue, name = COOKIE_NAME) {
-  return (name + '=' + encodedValue).length;
-}
-
-export function buildCookieString(encodedValue, opts = {}) {
-  const name = opts.name || COOKIE_NAME;
-  const years = opts.years ?? 10;
-  const now = opts.now ? new Date(opts.now) : new Date();
-  const exp = new Date(now.getTime());
-  exp.setFullYear(exp.getFullYear() + years);
-  return name + '=' + encodedValue + '; expires=' + exp.toUTCString() + '; path=/; SameSite=Lax';
+/** 實際會被寫進 storage 的字元數 */
+export function measureStorageBytes(encodedValue) {
+  return encodedValue.length;
 }
 
 /**
- * @param {{getCookie:()=>string, setCookie:(s:string)=>void, name?:string}} io
+ * @param {{getItem:()=>string, setItem:(s:string)=>void, key?:string}} io
  */
-export function createCookieStore(io) {
-  const name = io.name || COOKIE_NAME;
+export function createLocalStore(io) {
+  const key = io.key || STORAGE_KEY;
   return {
     /** @returns {{ok:boolean, bytes:number, reason?:string}} */
     save(state) {
       const encoded = encodeState(state);
-      const bytes = measureCookieBytes(encoded, name);
-      if (bytes > COOKIE_MAX_BYTES) {
+      const bytes = measureStorageBytes(encoded);
+      if (bytes > STORAGE_MAX_BYTES) {
         return { ok: false, bytes, reason: 'too-large' };
       }
       try {
-        io.setCookie(buildCookieString(encoded, { name }));
+        io.setItem(key, encoded);
       } catch (e) {
         return { ok: false, bytes, reason: 'write-failed' };
       }
       return { ok: true, bytes };
     },
     load() {
-      const raw = readCookieValue(io.getCookie(), name);
+      const raw = io.getItem(key);
       return normalizeState(decodeState(raw));
     },
   };

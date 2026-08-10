@@ -1,7 +1,7 @@
-/* 組裝層 — 唯一碰到瀏覽器 API（AudioContext / speechSynthesis / document.cookie）的地方 */
+/* 組裝層 — 唯一碰到瀏覽器 API（AudioContext / speechSynthesis / localStorage）的地方 */
 
 import { TimerStore } from './timers.js';
-import { createCookieStore } from './persistence.js';
+import { createLocalStore, readCookieValue, COOKIE_NAME } from './persistence.js';
 import { createSpeaker } from './announcer.js';
 import { createUI } from './ui.js';
 import { STR, isLang } from './i18n.js';
@@ -37,12 +37,21 @@ function beep() {
 }
 
 /* ---------------- 讀取設定 ---------------- */
-const cookieStore = createCookieStore({
-  getCookie: () => document.cookie,
-  setCookie: s => { document.cookie = s; },
+const storage = createLocalStore({
+  getItem: k => window.localStorage.getItem(k),
+  setItem: (k, v) => window.localStorage.setItem(k, v),
 });
 
-const saved = cookieStore.load();
+// 舊版存在 cookie 裡；localStorage 還是空的時候，搬過來一次就好，順便把舊 cookie 清掉。
+if (window.localStorage.getItem(COOKIE_NAME) === null) {
+  const legacy = readCookieValue(document.cookie, COOKIE_NAME);
+  if (legacy !== null) {
+    window.localStorage.setItem(COOKIE_NAME, legacy);
+    document.cookie = COOKIE_NAME + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+  }
+}
+
+const saved = storage.load();
 const lang = isLang(saved.lang) ? saved.lang : 'zh-Hant';
 
 /* ---------------- 建立狀態 ---------------- */
@@ -72,7 +81,7 @@ const speaker = createSpeaker({
 const ui = createUI({
   doc: document,
   store,
-  cookieStore,
+  storage,
   speaker,
   beep,
   ensureAudio,
@@ -86,4 +95,4 @@ const ui = createUI({
 ui.start();
 
 // 方便手動測試時在 console 裡戳
-window.__multiTimer = { store, ui, cookieStore, speaker };
+window.__multiTimer = { store, ui, storage, speaker };
