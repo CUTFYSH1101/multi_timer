@@ -85,6 +85,7 @@ export function createUI(config) {
     el('uiSubtitle').textContent = tr('subtitle');
     updateToggleAllButton();
     el('resetAllBtn').textContent = tr('resetAll');
+    el('resetAllBtn').title = tr('resetAllTip');
     el('addTimerBtn').textContent = tr('addTimer');
     el('addGroupBtn').textContent = tr('addGroup');
     if (addSuperGroupBtn) addSuperGroupBtn.textContent = tr('addSuperGroup');
@@ -538,9 +539,27 @@ export function createUI(config) {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable === true;
   }
 
+  /** 全域快捷鍵：空白鍵＝全部開始/暫停，Delete/Backspace＝全部重設。跟個別群組的快捷鍵不衝突（那些鍵不會落在這裡）。 */
   function onKeyDown(e) {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (isTypingTarget(e.target)) return;
+
+    if (e.key === ' ' || e.code === 'Space') {
+      e.preventDefault();
+      ensureAudio();
+      store.batchToggleStart(store.flatten());
+      render();
+      return;
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      ensureAudio();
+      store.resetAll();
+      speaker.stop();
+      render();
+      return;
+    }
+
     const target = store.triggerHotkey(e.key);
     if (!target) return;
     if (e.preventDefault) e.preventDefault();
