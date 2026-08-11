@@ -539,9 +539,28 @@ export function createUI(config) {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable === true;
   }
 
+  /** 按 Enter 跳到下一個欄位（標籤/時間，包含群組與母群組的標籤）：即時抓目前畫面上的順序，跳過收合群組跟被鎖住/隱藏的時間輸入框 */
+  function focusNextField(current) {
+    const fields = Array.from(doc.querySelectorAll('.label-input, .time-input, .group-label-input'))
+      .filter(node => node.offsetParent !== null);
+    const idx = fields.indexOf(current);
+    if (idx === -1) return;
+    const next = fields[idx + 1];
+    if (!next) return;
+    next.focus();
+    if (typeof next.select === 'function') next.select();
+  }
+
   /** 全域快捷鍵：空白鍵＝全部開始/暫停，Delete/Backspace＝全部重設。跟個別群組的快捷鍵不衝突（那些鍵不會落在這裡）。 */
   function onKeyDown(e) {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    if (e.key === 'Enter' && e.target && e.target.matches && e.target.matches('.label-input, .time-input, .group-label-input')) {
+      e.preventDefault();
+      focusNextField(e.target);
+      return;
+    }
+
     if (isTypingTarget(e.target)) return;
 
     if (e.key === ' ' || e.code === 'Space') {
