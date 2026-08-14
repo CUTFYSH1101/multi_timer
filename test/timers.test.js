@@ -184,6 +184,28 @@ describe('是否單元的開始/循環/重置/刪除功能正常', () => {
     assert.equal(t2.running, false, '沒開循環不該自己重啟');
   });
 
+  test('循環：設定 repeatSec 後，第一輪用 totalSec，之後每輪重啟用 repeatSec', () => {
+    const h = harness();
+    const t = h.store.addTimer('目標 1', 120); // 頭一輪 2 分鐘
+    h.store.setRepeatSec(t, 90);               // 之後每輪 1.5 分鐘
+    t.loop = true;
+    h.store.start(t);
+    near(t.remainingSec, 120);
+
+    h.jump(120000); // 頭一輪到期
+    assert.equal(t.done, true);
+    h.jump(LOOP_RESTART_MS);
+    assert.equal(t.remainingSec, 90, '重啟後應該用 repeatSec 而不是 totalSec');
+
+    h.jump(90000); // 第二輪到期
+    assert.equal(t.done, true);
+    h.jump(LOOP_RESTART_MS);
+    assert.equal(t.remainingSec, 90, '之後每輪都沿用 repeatSec');
+
+    h.store.setRepeatSec(t, null); // 取消特別設定
+    assert.equal(t.repeatSec, null);
+  });
+
   test('循環：在等待重啟的空檔按暫停，就不會再重啟', () => {
     const h = harness();
     const t = h.store.addTimer('目標 1', 5);

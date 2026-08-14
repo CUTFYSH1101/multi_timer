@@ -27,6 +27,7 @@ export function createUI(config) {
     ensureAudio = () => {},
     confirmFn = () => true,
     alertFn = () => {},
+    promptFn = () => null,
     lang: initialLang = 'zh-Hant',
     voice: initialVoice = true,
     announceMode: initialAnnounceMode = 'label',
@@ -153,7 +154,13 @@ export function createUI(config) {
     startBtn.textContent = timer.running ? '⏸' : '▶';
     startBtn.title = timer.running ? tr('pauseTip') : tr('startTip');
     startBtn.classList.toggle('active', timer.running);
-    row.querySelector('.loop-btn').classList.toggle('active', timer.loop);
+    const loopBtn = row.querySelector('.loop-btn');
+    loopBtn.classList.toggle('active', timer.loop);
+    const hasCustomRepeat = timer.repeatSec != null && timer.repeatSec !== timer.totalSec;
+    loopBtn.classList.toggle('has-repeat', hasCustomRepeat);
+    loopBtn.title = hasCustomRepeat
+      ? tr('loopTip') + '（' + tr('repeatSecTip') + ' ' + fmt(timer.repeatSec) + '）'
+      : tr('loopTip') + '（' + tr('repeatSecHint') + '）';
     applyMuteVisual(row, timer, false);
   }
 
@@ -240,8 +247,16 @@ export function createUI(config) {
     });
 
     const loopBtn = row.querySelector('.loop-btn');
-    loopBtn.title = tr('loopTip');
     loopBtn.addEventListener('click', () => { store.toggleLoop(timer); updateRowVisual(timer); });
+    loopBtn.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const ans = promptFn(tr('repeatSecPrompt'), fmt(timer.repeatSec != null ? timer.repeatSec : timer.totalSec));
+      if (ans === null) return;
+      const trimmed = ans.trim();
+      store.setRepeatSec(timer, trimmed === '' ? null : parseTime(trimmed));
+      updateRowVisual(timer);
+      save();
+    });
 
     const resetBtn = row.querySelector('.reset-btn');
     resetBtn.title = tr('resetTip');

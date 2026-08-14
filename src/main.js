@@ -87,6 +87,7 @@ const ui = createUI({
   ensureAudio,
   confirmFn: msg => window.confirm(msg),
   alertFn: msg => window.alert(msg),
+  promptFn: (msg, def) => window.prompt(msg, def),
   lang,
   voice: saved.voice,
   announceMode: saved.announceMode,

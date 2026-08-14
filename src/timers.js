@@ -69,6 +69,8 @@ export class TimerStore {
       parentGroupId,
       /** 本輪靜音：只影響「到期那一刻出不出聲」，倒數完全不受影響 */
       mutedThisRound: false,
+      /** 循環重複時要倒數的秒數；null＝跟 totalSec 一樣（預設行為，第一輪跟之後每輪都一樣長） */
+      repeatSec: null,
     };
   }
 
@@ -291,6 +293,12 @@ export class TimerStore {
     const sec = Math.max(0, Number(totalSec) || 0);
     timer.totalSec = sec;
     if (!timer.running) timer.remainingSec = sec;
+    return timer;
+  }
+
+  /** 設定循環重複時要倒數的秒數；傳 null 就是「跟 totalSec 一樣」，取消特別設定 */
+  setRepeatSec(timer, repeatSec) {
+    timer.repeatSec = repeatSec == null ? null : Math.max(0, Number(repeatSec) || 0);
     return timer;
   }
 
@@ -714,7 +722,7 @@ export class TimerStore {
       if (timer.restartAt !== null) {
         if (now >= timer.restartAt) {
           timer.restartAt = null;
-          timer.remainingSec = timer.totalSec;
+          timer.remainingSec = timer.repeatSec != null ? timer.repeatSec : timer.totalSec;
           timer.done = false;
           timer.running = true;
           timer.lastTick = now;
@@ -867,7 +875,11 @@ export class TimerStore {
 
   /** 只存「使用者設定」，不存當下的倒數/循環/收合/靜音狀態（刻意的） */
   toJSON() {
-    const serializeTimer = x => ({ label: x.label, totalSec: x.totalSec });
+    const serializeTimer = x => {
+      const out = { label: x.label, totalSec: x.totalSec };
+      if (x.repeatSec != null) out.repeatSec = x.repeatSec;
+      return out;
+    };
     const serializeGroup = g => {
       const out = { label: g.label, timers: g.timers.map(serializeTimer) };
       const tlIdx = this.timelines.findIndex(x => x.id === g.timelineId);
@@ -875,7 +887,7 @@ export class TimerStore {
       return out;
     };
     return this.items.map(it => {
-      if (it.kind === 'timer') return { kind: 'timer', label: it.label, totalSec: it.totalSec };
+      if (it.kind === 'timer') return { ...serializeTimer(it), kind: 'timer' };
       if (it.kind === 'supergroup') {
         const sg = { kind: 'supergroup', label: it.label, groups: it.groups.map(serializeGroup) };
         if (it.hotkey) sg.key = it.hotkey;
@@ -917,7 +929,8 @@ export class TimerStore {
     const loadGroupTimers = (g, timers) => {
       for (const tt of Array.isArray(timers) ? timers : []) {
         if (!tt || typeof tt !== 'object') continue;
-        this.addTimerToGroup(g.id, tt.label || fallback.timerLabel, num(tt.totalSec));
+        const timer = this.addTimerToGroup(g.id, tt.label || fallback.timerLabel, num(tt.totalSec));
+        if (tt.repeatSec != null) this.setRepeatSec(timer, num(tt.repeatSec));
       }
     };
 
@@ -940,7 +953,8 @@ export class TimerStore {
         if (it.key) this.setHotkey(g, it.key);
         loadGroupTimers(g, it.timers);
       } else {
-        this.addTimer(it.label || fallback.timerLabel, num(it.totalSec));
+        const timer = this.addTimer(it.label || fallback.timerLabel, num(it.totalSec));
+        if (it.repeatSec != null) this.setRepeatSec(timer, num(it.repeatSec));
       }
     }
     return this;

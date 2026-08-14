@@ -48,6 +48,8 @@ export const STR = {
     noGroups: '目前沒有群組或母群組。', noTimelines: '目前沒有時間軸模板。', noSuperGroups: '目前沒有母群組。',
     del: '刪除',
     footer3: '🔊 是<b>本輪靜音</b>：時間到那一刻不出聲，但倒數照跑、循環照接下一輪，跟暫停完全是兩回事。群組靜音蓋過單元靜音。靜音旗標只有按「⟲ 全部重設」（＝開場）才會一次清空。',
+    repeatSecHint: '右鍵設定重複間隔', repeatSecTip: '重複間隔',
+    repeatSecPrompt: '循環時每一輪要倒數幾秒？（留空＝跟原本時長一樣，格式 分:秒 或 秒）',
   },
 
   'zh-Hans': {
@@ -94,6 +96,8 @@ export const STR = {
     noGroups: '目前没有群组或母群组。', noTimelines: '目前没有时间轴模板。', noSuperGroups: '目前没有母群组。',
     del: '删除',
     footer3: '🔊 是<b>本轮静音</b>：时间到那一刻不出声，但倒数照跑、循环照接下一轮，跟暂停完全是两回事。群组静音盖过单元静音。静音旗标只有按「⟲ 全部重设」（＝开场）才会一次清空。',
+    repeatSecHint: '右键设定重复间隔', repeatSecTip: '重复间隔',
+    repeatSecPrompt: '循环时每一轮要倒数几秒？（留空＝跟原本时长一样，格式 分:秒 或 秒）',
   },
 
   'en': {
@@ -140,6 +144,8 @@ export const STR = {
     noGroups: 'No groups or super groups yet.', noTimelines: 'No timeline templates yet.', noSuperGroups: 'No super groups yet.',
     del: 'Delete',
     footer3: '🔊 is <b>mute this round</b>: silent at zero, but the countdown keeps running and loops still roll into the next round — it is not a pause. A muted group overrides its timers. Mute flags are only cleared by "⟲ Reset All" (kickoff).',
+    repeatSecHint: 'Right-click to set repeat interval', repeatSecTip: 'Repeat interval',
+    repeatSecPrompt: 'Seconds to count down on each repeat (blank = same as the original duration, format mm:ss or seconds):',
   },
 };
 

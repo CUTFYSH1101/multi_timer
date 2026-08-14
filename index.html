@@ -155,6 +155,12 @@
   .icon-btn:hover{background:var(--row-hover); color:var(--text);}
   .icon-btn.active{background:var(--row-color, var(--accent1)); color:#04231D; border-color:transparent;}
   .icon-btn.loop-btn.active{background:rgba(240,180,41,0.16); border-color:var(--accent2); color:var(--accent2);}
+  /* 循環重複秒數跟第一輪不一樣：加個小圓點提示，右鍵可改 */
+  .icon-btn.loop-btn.has-repeat{position:relative;}
+  .icon-btn.loop-btn.has-repeat::after{
+    content:''; position:absolute; top:2px; right:2px; width:6px; height:6px;
+    border-radius:50%; background:var(--accent4);
+  }
   /* 本輪靜音：只是不出聲，倒數照跑 —— 所以視覺上壓低，不是「停用」 */
   .icon-btn.mute-btn.active{background:rgba(251,113,133,0.16); border-color:var(--accent4); color:var(--accent4);}
   .row.silenced .label-input,
