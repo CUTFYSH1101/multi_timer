@@ -254,7 +254,7 @@ describe('是否單元的開始/循環/重置/刪除功能正常', () => {
 });
 
 describe('序列化', () => {
-  test('只存標籤與長度，不存執行中的狀態', () => {
+  test('只存標籤、長度與是否循環，不存當下跑到哪的執行狀態', () => {
     const h = harness();
     const t = h.store.addTimer('目標 1', 530);
     t.loop = true;
@@ -262,9 +262,8 @@ describe('序列化', () => {
     h.jump(3000);
 
     const json = h.store.toJSON();
-    assert.deepEqual(json, [{ kind: 'timer', label: '目標 1', totalSec: 530 }]);
+    assert.deepEqual(json, [{ kind: 'timer', label: '目標 1', totalSec: 530, loop: true }]);
     assert.ok(!('remainingSec' in json[0]));
-    assert.ok(!('loop' in json[0]));
   });
 
   test('群組結構可以完整來回，還原後一律是停著的滿血狀態', () => {

@@ -909,11 +909,13 @@ export class TimerStore {
     return null;
   }
 
-  /** 只存「使用者設定」，不存當下的倒數/循環/收合/靜音狀態（刻意的） */
+  /** 只存「使用者設定」，不存當下的倒數/收合/靜音狀態（刻意的）。
+   * 例外：🔁 循環是不是打開，這是使用者的偏好設定，要存；但「現在跑到哪、等不等重啟」這種當下狀態還是不存。 */
   toJSON() {
     const serializeTimer = x => {
       const out = { label: x.label, totalSec: x.totalSec };
       if (x.repeatSec != null) out.repeatSec = x.repeatSec;
+      if (x.loop) out.loop = true;
       return out;
     };
     const serializeGroup = g => {
@@ -967,6 +969,7 @@ export class TimerStore {
         if (!tt || typeof tt !== 'object') continue;
         const timer = this.addTimerToGroup(g.id, tt.label || fallback.timerLabel, num(tt.totalSec));
         if (tt.repeatSec != null) this.setRepeatSec(timer, num(tt.repeatSec));
+        if (tt.loop === true) timer.loop = true;
       }
     };
 
@@ -991,6 +994,7 @@ export class TimerStore {
       } else {
         const timer = this.addTimer(it.label || fallback.timerLabel, num(it.totalSec));
         if (it.repeatSec != null) this.setRepeatSec(timer, num(it.repeatSec));
+        if (it.loop === true) timer.loop = true;
       }
     }
     return this;

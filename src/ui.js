@@ -251,7 +251,7 @@ export function createUI(config) {
     });
 
     const loopBtn = row.querySelector('.loop-btn');
-    loopBtn.addEventListener('click', () => { store.toggleLoop(timer); updateRowVisual(timer); });
+    loopBtn.addEventListener('click', () => { store.toggleLoop(timer); updateRowVisual(timer); save(); });
     loopBtn.addEventListener('contextmenu', e => {
       e.preventDefault();
       const ans = promptFn(tr('repeatSecPrompt'), fmt(timer.repeatSec != null ? timer.repeatSec : timer.totalSec));
