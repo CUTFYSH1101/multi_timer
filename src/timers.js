@@ -578,6 +578,42 @@ export class TimerStore {
     });
   }
 
+  /**
+   * 全域快進/倒退：所有計時器的剩餘時間一起 ±deltaSec，模擬「假設現實世界快進/倒退幾秒」
+   * （遊戲中太慢才按全部開始，用這個補回錯過的時間）。
+   * 正在跑的計時器就地扣/加秒數，扣到 <=0 會照正常到期流程處理（含事件、循環、連線合併）；
+   * 沒在跑的（暫停或還沒開始）只調整 remainingSec，不觸發到期，夾在 [0, totalSec] 之間。
+   * 已經完全結束、不會再重啟的（done 且沒有 restartAt）不受影響——時間已經到了，不該被快進/倒退再去動它。
+   * 循環中正在等待自動重啟的（restartAt 不是 null）仍然要跟著調整等待時間，不然自動重啟的時機會跟真實時間對不上。
+   * @param {number} deltaSec 正值＝倒退（多留時間），負值＝快進（少留時間）
+   * @returns {Array} 跟 tick() 一樣格式的事件陣列
+   */
+  nudgeAll(deltaSec, list = this.flatten(), now = this.now()) {
+    const dt = Number(deltaSec) || 0;
+    const events = [];
+    if (dt === 0) return events;
+
+    for (const timer of list) {
+      if (timer.restartAt !== null) {
+        timer.restartAt += dt * 1000;
+        continue;
+      }
+      if (timer.done) continue;
+      if (timer.running) {
+        timer.remainingSec += dt;
+        if (timer.remainingSec <= 0) {
+          this._expire(timer, now);
+          events.push(this._expiredEvent(timer));
+        }
+        continue;
+      }
+      timer.remainingSec = Math.max(0, Math.min(timer.totalSec, timer.remainingSec + dt));
+    }
+
+    this._applyLinking(events, now);
+    return events;
+  }
+
   /* ---------- 合併語音通知 ---------- */
 
   /**

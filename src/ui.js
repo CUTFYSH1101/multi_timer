@@ -87,6 +87,10 @@ export function createUI(config) {
     updateToggleAllButton();
     el('resetAllBtn').textContent = tr('resetAll');
     el('resetAllBtn').title = tr('resetAllTip');
+    el('rewindAllBtn').textContent = tr('rewindAll');
+    el('rewindAllBtn').title = tr('rewindAllTip');
+    el('fastForwardAllBtn').textContent = tr('fastForwardAll');
+    el('fastForwardAllBtn').title = tr('fastForwardAllTip');
     el('addTimerBtn').textContent = tr('addTimer');
     el('addGroupBtn').textContent = tr('addGroup');
     if (addSuperGroupBtn) addSuperGroupBtn.textContent = tr('addSuperGroup');
@@ -566,7 +570,15 @@ export function createUI(config) {
     if (typeof next.select === 'function') next.select();
   }
 
-  /** 全域快捷鍵：空白鍵＝全部開始/暫停，Delete/Backspace＝全部重設。跟個別群組的快捷鍵不衝突（那些鍵不會落在這裡）。 */
+  /** 全部計時器一起快進/倒退幾秒：模擬「假設現實世界快進/回到過去幾秒」，遊戲中太慢按全部開始時拿來補時間差。 */
+  function nudgeAll(deltaSec) {
+    ensureAudio();
+    const events = store.nudgeAll(deltaSec);
+    handleEvents(events);
+    render();
+  }
+
+  /** 全域快捷鍵：空白鍵＝全部開始/暫停，Delete/Backspace＝全部重設，←/→＝全部倒退/快進5秒。跟個別群組的快捷鍵不衝突（那些鍵不會落在這裡）。 */
   function onKeyDown(e) {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
@@ -577,6 +589,12 @@ export function createUI(config) {
     }
 
     if (isTypingTarget(e.target)) return;
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      nudgeAll(e.key === 'ArrowRight' ? -5 : 5);
+      return;
+    }
 
     if (e.key === ' ' || e.code === 'Space') {
       e.preventDefault();
@@ -618,6 +636,9 @@ export function createUI(config) {
       speaker.stop();
       render();
     });
+
+    el('rewindAllBtn').addEventListener('click', () => nudgeAll(5));
+    el('fastForwardAllBtn').addEventListener('click', () => nudgeAll(-5));
 
     el('addTimerBtn').addEventListener('click', () => { store.addTimer(tr('newTimerLabel')); render(); });
     el('addGroupBtn').addEventListener('click', () => { store.addGroup(tr('newGroupLabel')); render(); });
